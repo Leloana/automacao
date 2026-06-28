@@ -1,0 +1,18 @@
+{
+  "name": "bot-juridico-whatsapp",
+  "version": "1.0.0",
+  "description": "Bot de WhatsApp para atendimento juridico inicial (DeepSeek + SQLite)",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "openai": "^4.83.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "advogados": [
+    {
+      "nome": "Equipe (exemplo - edite pelo painel)",
+      "numero": "5500000000000",
+      "areas": ["trabalhista", "familia"],
+      "padrao": true,
+      "ativo": true
+    }
+  ]
+}

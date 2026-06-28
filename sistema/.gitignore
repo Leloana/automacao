@@ -1,0 +1,33 @@
+node_modules/
+
+# Segredos
+.env
+
+# Sessao do WhatsApp (LocalAuth) e cache do puppeteer
+data/sessions/
+.wwebjs_cache/
+.wwebjs_auth/
+
+# Banco de dados gerado em runtime
+db/*.db
+db/*.db-journal
+db/*.db-wal
+db/*.db-shm
+
+# Arquivos de log gerados em runtime
+log.txt
+log-anterior.txt
+
+# Dados dos clientes (PRIVACIDADE/LGPD) - nunca vao para o repositorio
+clientes/*
+!clientes/.gitkeep
+
+# Configuracoes editaveis pelo painel: ficam so na maquina do escritorio.
+# No repositorio versionamos apenas os modelos ".exemplo".
+whitelist.json
+advogados.json
+personalidade.txt
+
+# Manter as pastas versionadas
+!data/sessions/.gitkeep
+!db/.gitkeep
