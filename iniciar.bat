@@ -2,8 +2,73 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 title Bot Juridico WhatsApp - Ferreira Ramos
+rem %~dp0 e a pasta deste .bat (raiz do projeto, com o .git e a pasta sistema).
+cd /d "%~dp0"
+
+echo ============================================
+echo   Bot Juridico WhatsApp - Ferreira Ramos
+echo ============================================
+echo.
+
+rem Se foi reiniciado apos uma atualizacao, pula o update e so reinstala deps.
+if "%~1"=="--updated" (
+  set "NEED_INSTALL=1"
+  goto APOS_UPDATE
+)
+
+rem ============================================================
+rem 0) Atualizacao automatica (git pull). NUNCA trava o inicio: se faltar
+rem    git/internet ou houver conflito, segue rodando a versao atual.
+rem ============================================================
+set "NEED_INSTALL="
+if not exist ".git" (
+  echo [INFO] Instalado sem controle de versao; atualizacao automatica desativada.
+  goto APOS_UPDATE
+)
+
+where git >nul 2>nul
+if not errorlevel 1 goto GIT_PRONTO
+echo [INFO] Git nao encontrado. Tentando instalar via winget...
+where winget >nul 2>nul
+if errorlevel 1 (
+  echo [INFO] winget indisponivel; seguindo sem atualizar.
+  goto APOS_UPDATE
+)
+winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements
+set "PATH=%PATH%;C:\Program Files\Git\cmd"
+where git >nul 2>nul
+if errorlevel 1 (
+  echo [INFO] Git instalado; pode ser preciso reabrir. Seguindo sem atualizar agora.
+  goto APOS_UPDATE
+)
+
+:GIT_PRONTO
+echo Procurando atualizacoes...
+set "GIT_TERMINAL_PROMPT=0"
+for /f "delims=" %%i in ('git rev-parse HEAD 2^>nul') do set "REV_ANTES=%%i"
+git pull --ff-only
+if errorlevel 1 (
+  echo [INFO] Nao foi possivel atualizar agora ^(sem internet ou alteracoes locais^). Seguindo.
+  goto APOS_UPDATE
+)
+for /f "delims=" %%i in ('git rev-parse HEAD 2^>nul') do set "REV_DEPOIS=%%i"
+if "!REV_ANTES!"=="!REV_DEPOIS!" (
+  echo [OK] Ja esta na versao mais recente.
+  goto APOS_UPDATE
+)
+echo [OK] Sistema atualizado para a versao mais recente.
+rem Se o proprio iniciar.bat mudou, reinicia para evitar erro de execucao.
+git diff --name-only "!REV_ANTES!" "!REV_DEPOIS!" | findstr /I /C:"iniciar.bat" >nul
+if not errorlevel 1 (
+  echo [INFO] O iniciar foi atualizado. Reiniciando...
+  start "" "%~f0" --updated
+  exit /b 0
+)
+rem Atualizou algo (possivelmente dependencias): reinstala por seguranca.
+set "NEED_INSTALL=1"
+
+:APOS_UPDATE
 rem Entra na pasta "sistema", onde ficam todos os arquivos do bot.
-rem (%~dp0 e a pasta deste .bat, mesmo que seja aberto de outro lugar.)
 cd /d "%~dp0sistema"
 if errorlevel 1 (
   echo [ERRO] Pasta "sistema" nao encontrada ao lado deste arquivo.
@@ -12,11 +77,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-
-echo ============================================
-echo   Bot Juridico WhatsApp - Ferreira Ramos
-echo ============================================
-echo.
 
 rem ============================================================
 rem 1) Node.js (OBRIGATORIO) - sem ele o bot nao roda.
@@ -66,11 +126,12 @@ exit /b 1
 for /f "delims=" %%v in ('node --version 2^>nul') do echo [OK] Node.js %%v
 
 rem ============================================================
-rem 2) Dependencias do Node (instala na primeira vez).
+rem 2) Dependencias do Node (instala na primeira vez ou apos atualizacao).
 rem ============================================================
-if not exist "node_modules" (
+if not exist "node_modules" set "NEED_INSTALL=1"
+if defined NEED_INSTALL (
   echo.
-  echo Primeira execucao detectada. Instalando dependencias...
+  echo Instalando/atualizando dependencias do Node...
   echo Isso pode levar alguns minutos.
   echo.
   call npm install
