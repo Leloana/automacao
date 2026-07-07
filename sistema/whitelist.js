@@ -1,5 +1,6 @@
 // whitelist.js
 // Controla quais numeros sao respondidos automaticamente pelo bot.
+// A whitelist esta SEMPRE ativa: o bot responde apenas os numeros da lista.
 // A configuracao fica em whitelist.json (gerenciavel pelo painel web).
 
 const fs = require('fs');
@@ -14,23 +15,24 @@ function soDigitos(s) {
 
 /**
  * Le a configuracao da whitelist. Em caso de arquivo ausente ou invalido,
- * retorna a whitelist DESLIGADA (responde todos) para nao travar o bot por engano.
+ * retorna a lista VAZIA (nao responde ninguem) para nunca responder numero
+ * nao autorizado por engano.
  */
 function lerConfig() {
   try {
     if (!fs.existsSync(CONFIG_PATH)) {
-      return { habilitada: false, numeros: [] };
+      return { habilitada: true, numeros: [] };
     }
     const dados = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     return {
-      habilitada: dados.habilitada !== false, // ausente => considera habilitada
+      habilitada: true, // whitelist sempre ativa
       numeros: Array.isArray(dados.numeros)
         ? dados.numeros.map(soDigitos).filter(Boolean)
         : [],
     };
   } catch (e) {
     console.error('Erro ao ler whitelist.json:', e.message);
-    return { habilitada: false, numeros: [] };
+    return { habilitada: true, numeros: [] };
   }
 }
 
@@ -38,7 +40,7 @@ function lerConfig() {
  * Grava a configuracao (usado pelo painel). Normaliza os numeros e remove
  * duplicados. Retorna o objeto efetivamente salvo.
  */
-function salvarConfig({ habilitada, numeros }) {
+function salvarConfig({ numeros }) {
   const limpos = Array.isArray(numeros)
     ? [...new Set(
         numeros
@@ -47,7 +49,7 @@ function salvarConfig({ habilitada, numeros }) {
           .filter((n) => n.length >= 12 && n.length <= 13)
       )]
     : [];
-  const conteudo = { habilitada: habilitada !== false, numeros: limpos };
+  const conteudo = { habilitada: true, numeros: limpos };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(conteudo, null, 2), 'utf8');
   return conteudo;
 }
@@ -70,12 +72,11 @@ function variantes(n) {
 
 /**
  * Indica se um numero pode ser respondido automaticamente.
- * - Whitelist desligada: responde todos.
- * - Whitelist ligada: responde apenas os numeros da lista (tolerando o "9" inicial).
+ * A whitelist esta sempre ativa: responde apenas os numeros da lista
+ * (tolerando o "9" inicial do celular).
  */
 function numeroPermitido(numero) {
   const cfg = lerConfig();
-  if (!cfg.habilitada) return true;
   const vars = variantes(soDigitos(numero));
   return vars.some((v) => cfg.numeros.includes(v));
 }

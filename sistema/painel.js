@@ -123,12 +123,7 @@ const HTML = `<!DOCTYPE html>
   <!-- Whitelist -->
   <div class="card">
     <h2>Whitelist de números</h2>
-    <p class="sub">Quando habilitada, o bot responde <b>apenas</b> os números desta lista.</p>
-
-    <label class="toggle">
-      <input type="checkbox" id="habilitada" />
-      <span>Whitelist habilitada<small>Desmarque para o bot responder qualquer número.</small></span>
-    </label>
+    <p class="sub">O bot responde <b>apenas</b> os números desta lista.</p>
 
     <div class="add">
       <input type="text" id="novo" placeholder="Ex: 5514998689481" />
@@ -243,13 +238,11 @@ const HTML = `<!DOCTYPE html>
     const r = await fetch('/api/whitelist');
     const cfg = await r.json();
     numeros = cfg.numeros || [];
-    document.getElementById('habilitada').checked = cfg.habilitada !== false;
     render();
   }
   async function salvar(){
-    const habilitada = document.getElementById('habilitada').checked;
     try {
-      const r = await fetch('/api/whitelist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ habilitada, numeros }) });
+      const r = await fetch('/api/whitelist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ numeros }) });
       const cfg = await r.json();
       numeros = cfg.numeros || [];
       render();
