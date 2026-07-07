@@ -195,27 +195,18 @@ if errorlevel 1 (
 echo [OK] Navegador do WhatsApp pronto.
 
 rem ============================================================
-rem 3) Arquivo .env e chave da API (OBRIGATORIO para responder).
+rem 3) Chave da API (DeepSeek). NAO trava o inicio: se faltar, o bot sobe
+rem    mesmo assim e o cliente cola a chave direto no painel web (aba "Chave
+rem    da API"). Sem chave o bot conecta ao WhatsApp, mas nao responde.
 rem ============================================================
-if not exist ".env" (
-  echo.
-  echo [ERRO] Arquivo .env nao encontrado.
-  echo Abra a pasta "sistema" e rode "configurar.bat" para informar a chave da API.
-  echo.
-  pause
-  exit /b 1
+set "APIKEY_OK="
+if exist ".env" findstr /R /C:"^DEEPSEEK_API_KEY=." ".env" >nul && set "APIKEY_OK=1"
+if defined APIKEY_OK (
+  echo [OK] Chave da API configurada.
+) else (
+  echo [AVISO] Chave da API ainda nao configurada.
+  echo         Quando o painel abrir, cole a chave na aba "Chave da API" e salve.
 )
-rem Verifica se DEEPSEEK_API_KEY tem algum valor (linha com algo apos o "=").
-findstr /R /C:"^DEEPSEEK_API_KEY=." ".env" >nul
-if errorlevel 1 (
-  echo.
-  echo [ERRO] A chave DEEPSEEK_API_KEY esta vazia no arquivo .env.
-  echo Na pasta "sistema", rode "configurar.bat", cole a chave e salve antes de iniciar.
-  echo.
-  pause
-  exit /b 1
-)
-echo [OK] Chave da API configurada.
 echo [OK] Consulta de processos via endpoint do escritorio (DataJud).
 
 echo.

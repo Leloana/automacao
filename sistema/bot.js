@@ -79,10 +79,23 @@ const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 const INSTITUICAO_PADRAO_ID = Number(process.env.INSTITUICAO_PADRAO_ID || 1);
 
 // Cliente da API DeepSeek (compativel com a SDK da OpenAI).
+// IMPORTANTE: a SDK lanca excecao se apiKey vier vazio na construcao. Como o
+// bot precisa subir MESMO sem chave (para o cliente cola-la depois no painel),
+// usamos um placeholder quando falta a chave. Sem chave real, as requisicoes
+// falham (401) e o cliente recebe a mensagem de instabilidade padrao — mas o
+// painel abre normalmente para configurar a chave.
 const openai = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
+  apiKey: process.env.DEEPSEEK_API_KEY || 'sem-chave-configurada',
   baseURL: 'https://api.deepseek.com',
 });
+
+// Troca a chave da API em tempo de execucao (usado pelo painel quando o
+// cliente cola a chave). A SDK le this.apiKey a cada requisicao, entao basta
+// atualizar o valor — nao precisa recriar o cliente nem reiniciar o bot.
+function setDeepseekKey(chave) {
+  openai.apiKey = String(chave || '').trim();
+  process.env.DEEPSEEK_API_KEY = openai.apiKey;
+}
 
 // Mensagem enviada ao cliente quando a API falha.
 const MSG_INSTABILIDADE =
@@ -473,4 +486,4 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
 
 // Exporta tambem funcoes internas para testes de integracao (chamada a API e
 // interpretacao do JSON), permitindo exercitar o fluxo sem o WhatsApp.
-module.exports = { handleMessage, chamarDeepSeek, extrairDados };
+module.exports = { handleMessage, chamarDeepSeek, extrairDados, setDeepseekKey };

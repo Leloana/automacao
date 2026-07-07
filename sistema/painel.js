@@ -10,6 +10,7 @@ const { lerConfig, salvarConfig } = require('./whitelist');
 const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require('./prompt');
 const { getAdvogados, salvarAdvogados } = require('./advogados');
 const { readMarkdown, escreverMarkdown } = require('./context');
+const apikey = require('./apikey');
 const db = require('./db');
 
 // Estado da conexao do WhatsApp, atualizado pelo index.js via setStatus/setQR.
@@ -65,7 +66,7 @@ const HTML = `<!DOCTYPE html>
   .toggle input { width: 18px; height: 18px; }
   .toggle small { color: #94a3b8; display: block; }
   .add { display: flex; gap: 8px; margin-bottom: 16px; }
-  input[type=text] { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
+  input[type=text], input[type=password] { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
   textarea { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 14px; line-height: 1.5; font-family: inherit; resize: vertical; }
   select { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
   button { cursor: pointer; border: none; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600; }
@@ -91,6 +92,20 @@ const HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
+  <!-- Chave da API (DeepSeek) -->
+  <div class="card">
+    <h2>Chave da API (DeepSeek)</h2>
+    <p class="sub">Sem esta chave o bot conecta ao WhatsApp, mas <b>não consegue responder</b>. Cole a chave fornecida pelo escritório e clique em Salvar.</p>
+    <div id="apikey-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="apikey-estado-txt">Verificando...</span></div>
+    <div class="add">
+      <input type="password" id="apikey" placeholder="Cole aqui a chave (ex: sk-...)" autocomplete="off" />
+      <button class="btn-add" onclick="mostrarChave()" title="Mostrar/ocultar" id="apikey-olho">👁</button>
+    </div>
+    <button class="btn-save" onclick="salvarApiKey()">Salvar chave</button>
+    <div class="status" id="status-apikey"></div>
+    <p class="sub" style="margin-top:16px">A chave fica guardada só neste computador (arquivo <code>.env</code>) e nunca vai para a internet nem para o repositório.</p>
+  </div>
+
   <!-- Conexao do WhatsApp -->
   <div class="card">
     <h1>Conexão do WhatsApp</h1>
@@ -411,6 +426,44 @@ const HTML = `<!DOCTYPE html>
     } catch (e) { setStatusCli('Erro ao salvar: ' + e.message, false); }
   }
 
+  // ---- Chave da API (DeepSeek) ----
+  function setStatusApiKey(msg, ok){
+    const s = document.getElementById('status-apikey');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  function mostrarChave(){
+    const inp = document.getElementById('apikey');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+  async function carregarApiKey(){
+    try {
+      const r = await fetch('/api/apikey');
+      const d = await r.json();
+      const est = document.getElementById('apikey-estado');
+      const txt = document.getElementById('apikey-estado-txt');
+      if (d.configurada) {
+        est.className = 'banner b-conectado';
+        txt.textContent = 'Chave configurada (' + d.mascara + ')';
+      } else {
+        est.className = 'banner b-falha';
+        txt.textContent = 'Nenhuma chave configurada — o bot não vai responder.';
+      }
+    } catch (e) { /* ignora */ }
+  }
+  async function salvarApiKey(){
+    const chave = document.getElementById('apikey').value.trim();
+    if (!chave) return setStatusApiKey('Cole a chave antes de salvar.', false);
+    try {
+      const r = await fetch('/api/apikey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave }) });
+      const d = await r.json();
+      if (d.erro) return setStatusApiKey('Erro: ' + d.erro, false);
+      document.getElementById('apikey').value = '';
+      setStatusApiKey('Chave salva! Já vale para as próximas mensagens (sem reiniciar).', true);
+      carregarApiKey();
+    } catch (e) { setStatusApiKey('Erro ao salvar: ' + e.message, false); }
+  }
+
+  carregarApiKey();
   carregarWhitelist();
   carregarPersonalidade();
   carregarAdvs();
@@ -458,6 +511,16 @@ function iniciarPainel(porta = 3000) {
     // Status da conexao do WhatsApp (consultado em loop pela pagina).
     if (req.method === 'GET' && req.url === '/api/status') {
       return enviarJson(res, 200, { status: estado.status, qr: estado.qrDataUrl });
+    }
+
+    // Estado da chave da API (nunca devolve a chave inteira, so mascara).
+    if (req.method === 'GET' && req.url === '/api/apikey') {
+      return enviarJson(res, 200, apikey.status());
+    }
+
+    // Salvar a chave da API. Aplica na hora, sem reiniciar o bot.
+    if (req.method === 'POST' && req.url === '/api/apikey') {
+      return lerCorpo(req, res, (corpo) => apikey.salvarChave(corpo.chave));
     }
 
     // Ler a whitelist.
