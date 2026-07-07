@@ -80,34 +80,57 @@ if errorlevel 1 (
 
 rem ============================================================
 rem 1) Node.js (OBRIGATORIO) - sem ele o bot nao roda.
-rem    Se faltar, tenta instalar sozinho pelo winget (Windows 10/11).
+rem    ATENCAO: os modulos nativos (better-sqlite3) sao compilados para UMA
+rem    versao MAIOR do Node (ABI). Este projeto foi feito no Node 22, entao
+rem    FIXAMOS o Node 22. O pacote generico "OpenJS.NodeJS.LTS" do winget hoje
+rem    instala o Node 24 (ABI diferente) e quebra o better-sqlite3, que ainda
+rem    nao tem binario pronto para o 24. Por isso usamos o pacote "OpenJS.NodeJS.22".
 rem ============================================================
-where node >nul 2>nul
-if not errorlevel 1 goto NODE_OK
+set "NODE_REQ_MAJOR=22"
+set "NODE_WINGET_ID=OpenJS.NodeJS.22"
 
-echo [AVISO] Node.js nao encontrado. Vou tentar instalar automaticamente...
+where node >nul 2>nul
+if errorlevel 1 (
+  echo [AVISO] Node.js nao encontrado. Vou instalar o Node %NODE_REQ_MAJOR% automaticamente...
+  echo.
+  goto NODE_INSTALL
+)
+
+rem Node existe: confere se a versao MAIOR e a exigida por este sistema.
+set "NODE_MAJOR="
+for /f "tokens=1 delims=." %%v in ('node --version 2^>nul') do set "NODE_MAJOR=%%v"
+set "NODE_MAJOR=!NODE_MAJOR:v=!"
+if "!NODE_MAJOR!"=="%NODE_REQ_MAJOR%" goto NODE_OK
+
+echo [AVISO] Este PC tem o Node !NODE_MAJOR!, mas este sistema exige o Node %NODE_REQ_MAJOR%.
+echo Vou ajustar para a versao correta ^(isso corrige o erro "NODE_MODULE_VERSION"^)...
 echo.
+
+:NODE_INSTALL
 where winget >nul 2>nul
 if errorlevel 1 goto NODE_MANUAL
 
-echo Instalando o Node.js LTS. Pode pedir permissao (clique em "Sim") e levar
-echo alguns minutos. Aguarde...
+echo Instalando o Node.js %NODE_REQ_MAJOR% ^(versao fixa para compatibilidade^).
+echo Pode pedir permissao ^(clique em "Sim"^) e levar alguns minutos. Aguarde...
 echo.
-winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
+rem --force troca a versao mesmo que ja exista outro Node instalado.
+winget install -e --id %NODE_WINGET_ID% --force --accept-source-agreements --accept-package-agreements
 
-rem Esta janela ainda nao conhece o Node recem-instalado: adiciona o caminho
-rem padrao para tentar continuar sem precisar reabrir.
-set "PATH=%PATH%;C:\Program Files\nodejs"
-where node >nul 2>nul
-if not errorlevel 1 goto NODE_OK
+rem Coloca o caminho padrao do Node na FRENTE do PATH para esta janela usar
+rem imediatamente a versao recem-instalada (sem precisar reabrir).
+set "PATH=C:\Program Files\nodejs;%PATH%"
+set "NODE_MAJOR="
+for /f "tokens=1 delims=." %%v in ('node --version 2^>nul') do set "NODE_MAJOR=%%v"
+set "NODE_MAJOR=!NODE_MAJOR:v=!"
+if "!NODE_MAJOR!"=="%NODE_REQ_MAJOR%" goto NODE_OK
 
 echo.
 echo ============================================
-echo  Quase la! Se o Node.js foi instalado agora,
+echo  O Node.js %NODE_REQ_MAJOR% foi instalado/ajustado agora.
 echo  FECHE esta janela e abra o "iniciar.bat" de novo.
 echo.
-echo  Se aparecer erro de instalacao, baixe a versao
-echo  LTS manualmente em: https://nodejs.org
+echo  Se aparecer erro de instalacao, baixe o Node %NODE_REQ_MAJOR%
+echo  manualmente em: https://nodejs.org/dist/latest-v%NODE_REQ_MAJOR%.x/
 echo ============================================
 echo.
 pause
@@ -116,7 +139,7 @@ exit /b 1
 :NODE_MANUAL
 echo [ERRO] Nao foi possivel instalar automaticamente (winget indisponivel).
 echo.
-echo Baixe e instale a versao LTS em: https://nodejs.org
+echo Baixe e instale o Node %NODE_REQ_MAJOR% em: https://nodejs.org/dist/latest-v%NODE_REQ_MAJOR%.x/
 echo Depois feche e abra este arquivo novamente.
 echo.
 pause
