@@ -129,6 +129,17 @@ rem ============================================================
 rem 2) Dependencias do Node (instala na primeira vez ou apos atualizacao).
 rem ============================================================
 if not exist "node_modules" set "NEED_INSTALL=1"
+rem Modulos nativos (better-sqlite3) sao compilados para UMA versao de Node.
+rem Se a pasta node_modules veio de outra maquina/versao (ex.: copiada num zip),
+rem o require falha; nesse caso apaga tudo e reinstala para este Node.
+if not defined NEED_INSTALL (
+  node -e "require('better-sqlite3')" >nul 2>nul
+  if errorlevel 1 (
+    echo [INFO] Dependencias incompativeis com este Node. Vou reinstalar...
+    rmdir /s /q "node_modules" 2>nul
+    set "NEED_INSTALL=1"
+  )
+)
 if defined NEED_INSTALL (
   echo.
   echo Instalando/atualizando dependencias do Node...
@@ -143,6 +154,22 @@ if defined NEED_INSTALL (
   )
 )
 echo [OK] Dependencias do Node prontas.
+
+rem O Chrome usado pelo WhatsApp fica no cache do usuario (fora do projeto);
+rem numa maquina nova ele pode faltar mesmo com node_modules presente.
+node -e "process.exit(require('fs').existsSync(require('puppeteer').executablePath()) ? 0 : 1)" >nul 2>nul
+if errorlevel 1 (
+  echo.
+  echo Baixando o navegador usado pelo WhatsApp ^(so na primeira vez^)...
+  call npx puppeteer browsers install chrome
+  if errorlevel 1 (
+    echo.
+    echo [ERRO] Falha ao baixar o navegador. Verifique a internet e tente de novo.
+    pause
+    exit /b 1
+  )
+)
+echo [OK] Navegador do WhatsApp pronto.
 
 rem ============================================================
 rem 3) Arquivo .env e chave da API (OBRIGATORIO para responder).
