@@ -110,10 +110,23 @@ echo.
 where winget >nul 2>nul
 if errorlevel 1 goto NODE_MANUAL
 
+rem IMPORTANTE: se ja existe um Node de OUTRA versao maior, e preciso DESINSTALAR
+rem antes. O instalador do Node se recusa a "rebaixar" (ex.: 24 -> 22): ele acha
+rem que ja ha uma versao mais nova e nao faz nada, mas retorna "sucesso" -> o bat
+rem reabria e detectava o 24 de novo, entrando em loop. Removendo o antigo, o
+rem Node 22 instala limpo.
+if defined NODE_MAJOR (
+  echo Removendo a versao atual do Node ^(!NODE_MAJOR!^) antes de instalar a correta...
+  winget uninstall -e --id OpenJS.NodeJS.LTS --silent --accept-source-agreements >nul 2>nul
+  winget uninstall -e --id OpenJS.NodeJS --silent --accept-source-agreements >nul 2>nul
+  winget uninstall --name "Node.js" --silent --accept-source-agreements >nul 2>nul
+  echo Versao antiga removida.
+  echo.
+)
+
 echo Instalando o Node.js %NODE_REQ_MAJOR% ^(versao fixa para compatibilidade^).
 echo Pode pedir permissao ^(clique em "Sim"^) e levar alguns minutos. Aguarde...
 echo.
-rem --force troca a versao mesmo que ja exista outro Node instalado.
 winget install -e --id %NODE_WINGET_ID% --force --accept-source-agreements --accept-package-agreements
 
 rem Coloca o caminho padrao do Node na FRENTE do PATH para esta janela usar
@@ -124,13 +137,18 @@ for /f "tokens=1 delims=." %%v in ('node --version 2^>nul') do set "NODE_MAJOR=%
 set "NODE_MAJOR=!NODE_MAJOR:v=!"
 if "!NODE_MAJOR!"=="%NODE_REQ_MAJOR%" goto NODE_OK
 
+rem Chegou aqui: mesmo apos desinstalar+instalar, o Node ainda nao e o %NODE_REQ_MAJOR%.
+rem Nao mandamos "reabrir" (evita o loop) — damos o passo manual definitivo.
 echo.
 echo ============================================
-echo  O Node.js %NODE_REQ_MAJOR% foi instalado/ajustado agora.
-echo  FECHE esta janela e abra o "iniciar.bat" de novo.
+echo  [ATENCAO] Nao consegui trocar o Node automaticamente.
+echo  O Node detectado ainda e: !NODE_MAJOR!
 echo.
-echo  Se aparecer erro de instalacao, baixe o Node %NODE_REQ_MAJOR%
-echo  manualmente em: https://nodejs.org/dist/latest-v%NODE_REQ_MAJOR%.x/
+echo  Faca a troca manual (uma vez so):
+echo   1) Abra "Adicionar ou remover programas" e DESINSTALE o "Node.js".
+echo   2) Instale o Node %NODE_REQ_MAJOR% (arquivo .msi x64) por este link:
+echo      https://nodejs.org/dist/latest-v%NODE_REQ_MAJOR%.x/
+echo   3) Abra o "iniciar.bat" de novo.
 echo ============================================
 echo.
 pause
