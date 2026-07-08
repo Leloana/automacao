@@ -340,9 +340,10 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
     // 6) Se o cliente tiver MD proprio, le e inclui no contexto.
     const contextoCliente = cliente.arquivo_md ? readMarkdown(cliente.arquivo_md) : '';
 
-    // 7) Recupera as ultimas 10 mensagens do historico. Se estiver vazio, esta
-    // e a primeira interacao do cliente (a "saudacao inicial") — o unico momento
-    // em que adicionamos o aviso educativo.
+    // 7) Recupera a janela de mensagens recentes do historico (HISTORICO_LIMIT,
+    // ver db.js). Se estiver vazio, esta e a primeira interacao do cliente (a
+    // "saudacao inicial") — o unico momento em que adicionamos o aviso educativo.
+    // O contexto anterior a essa janela e preservado no resumo .md do cliente.
     const historico = db.getHistorico(cliente.id);
     const ehPrimeiraInteracao = historico.length === 0;
 

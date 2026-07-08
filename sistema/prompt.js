@@ -122,7 +122,7 @@ Regras de cada campo:
     - Ao receber os dados do processo, responda em linguagem simples e curta (fase atual e movimentação mais recente), usando apenas os dados fornecidos — não invente.
 - "perfil": um resumo do cliente para o escritório consultar depois, construído a partir de TODA a conversa (incluindo o "Contexto do cliente" acima, se houver).
     - "area_interesse": em poucas palavras, o assunto/área jurídica que o cliente procura (ex.: "rescisão trabalhista", "pensão alimentícia", "consulta sobre processo"). Se ainda não der para saber, deixe "".
-    - "observacoes": de 1 a 3 frases curtas e factuais resumindo a situação do cliente e o que ele precisa. Vá enriquecendo conforme a conversa avança e mantenha o que já era verdade. Use apenas o que o cliente disse — nunca invente dados. Se ainda não houver nada relevante, deixe "".
+    - "observacoes": a MEMÓRIA de longo prazo do caso. Só as mensagens mais recentes ficam visíveis para você; as antigas saem da conversa. Por isso, registre aqui os fatos essenciais para que nada importante se perca: o que aconteceu, desde quando (datas), o que o cliente deseja e os dados já levantados na triagem. Resumo corrido e factual, tipicamente de 2 a 5 frases curtas. Vá enriquecendo conforme a conversa avança e SEMPRE mantenha o que já era verdade (não apague fatos anteriores ao acrescentar novos). Use apenas o que o cliente disse — nunca invente dados. Se ainda não houver nada relevante, deixe "".
 
 Quando "escalar" for true, mantenha "resposta" curta e tranquilizadora, mostrando que já entendeu o caso (por exemplo: "Entendi sua situação, já vou te direcionar para nossa equipe, que vai cuidar disso, tá?") e NÃO inclua telefone nem instruções de contato no texto — o sistema cuida disso.`;
 }

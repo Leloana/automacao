@@ -16,6 +16,11 @@ if (!fs.existsSync(DB_DIR)) {
 const DB_PATH = path.join(DB_DIR, 'bot.db');
 const db = new Database(DB_PATH);
 
+// Quantas mensagens recentes do cliente enviamos ao modelo (e mantemos no banco)
+// como "janela" de contexto imediato. Configuravel por env; padrao 30 (~15 trocas).
+// O contexto de longo prazo alem dessa janela e mantido no resumo .md do cliente.
+const HISTORICO_LIMIT = Number(process.env.HISTORICO_LIMIT) || 30;
+
 // Recomendado para better-sqlite3: melhora concorrencia de leitura/escrita.
 db.pragma('journal_mode = WAL');
 // Garante que as chaves estrangeiras sejam respeitadas.
@@ -119,18 +124,18 @@ function getCliente(id) {
 }
 
 /**
- * Retorna as ultimas 10 mensagens do cliente em ordem cronologica
+ * Retorna as ultimas HISTORICO_LIMIT mensagens do cliente em ordem cronologica
  * (mais antiga primeiro), no formato [{ role, conteudo }].
  */
 function getHistorico(clienteId) {
-  // Pega as 10 mais recentes (DESC) e depois inverte para ordem cronologica.
+  // Pega as mais recentes (DESC) e depois inverte para ordem cronologica.
   const linhas = db.prepare(`
     SELECT role, conteudo
     FROM historico
     WHERE cliente_id = ?
     ORDER BY id DESC
-    LIMIT 10
-  `).all(clienteId);
+    LIMIT ?
+  `).all(clienteId, HISTORICO_LIMIT);
 
   return linhas.reverse();
 }
@@ -149,7 +154,8 @@ function saveMessage(clienteId, role, conteudo) {
 }
 
 /**
- * Mantem apenas as 10 mensagens mais recentes do cliente, deletando as demais.
+ * Mantem apenas as HISTORICO_LIMIT mensagens mais recentes do cliente,
+ * deletando as demais.
  */
 function pruneHistorico(clienteId) {
   db.prepare(`
@@ -159,9 +165,9 @@ function pruneHistorico(clienteId) {
         SELECT id FROM historico
         WHERE cliente_id = ?
         ORDER BY id DESC
-        LIMIT 10
+        LIMIT ?
       )
-  `).run(clienteId, clienteId);
+  `).run(clienteId, clienteId, HISTORICO_LIMIT);
 }
 
 module.exports = {
