@@ -406,8 +406,7 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
 
       mensagemCliente =
         'Obrigada por compartilhar tudo isso comigo! 😊 Nossa equipe já foi avisada e está a par do seu caso. ' +
-        'Agora é só chamar no WhatsApp para dar continuidade ao seu atendimento, combinado? ' +
-        `Pode falar com a gente por aqui: ${numeroHumano}`;
+        'Um de nossos advogados vai entrar em contato com você por aqui em breve para dar continuidade ao atendimento, combinado?';
 
       // 9b) Avisa o advogado com um resumo do atendimento encaminhado.
       if (numeroHumano) {
@@ -418,7 +417,8 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
           `Área: ${dados.area || 'geral'}\n` +
           `Motivo: ${dados.motivo || 'não informado'}\n\n` +
           `Última mensagem do cliente:\n"${texto}"\n\n` +
-          'O cliente recebeu seu contato e pode chamar a qualquer momento.';
+          'O cliente NÃO recebeu nenhum contato — avisamos que um advogado o chamaria. ' +
+          'Por favor, entre em contato com o cliente para dar continuidade ao atendimento.';
         try {
           await client.sendMessage(`${numeroHumano}@c.us`, aviso);
         } catch (notifyErr) {
