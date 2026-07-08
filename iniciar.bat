@@ -181,6 +181,12 @@ if not defined NEED_INSTALL (
     set "NEED_INSTALL=1"
   )
 )
+rem IMPORTANTE: o puppeteer baixa o navegador automaticamente durante o "npm
+rem install". Esse download e fragil: se cair a internet no meio, ele deixa a
+rem pasta do navegador (ex.: chrome-headless-shell) criada MAS sem o .exe, se
+rem recusa a rebaixar e ABORTA todo o npm install. Por isso PULAMOS esse download
+rem aqui e baixamos o navegador no passo seguinte, isolado e com limpeza/retry.
+set "PUPPETEER_SKIP_DOWNLOAD=1"
 if defined NEED_INSTALL (
   echo.
   echo Instalando/atualizando dependencias do Node...
@@ -194,20 +200,32 @@ if defined NEED_INSTALL (
     exit /b 1
   )
 )
+set "PUPPETEER_SKIP_DOWNLOAD="
 echo [OK] Dependencias do Node prontas.
 
 rem O Chrome usado pelo WhatsApp fica no cache do usuario (fora do projeto);
 rem numa maquina nova ele pode faltar mesmo com node_modules presente.
-node -e "process.exit(require('fs').existsSync(require('puppeteer').executablePath()) ? 0 : 1)" >nul 2>nul
+rem A verificacao abaixo pega DOIS casos: (a) navegador ausente e (b) download
+rem pela metade (pasta do navegador criada, mas SEM o .exe dentro) - foi isso que
+rem quebrou o boot. Nos dois casos, apagamos o cache e baixamos de novo.
+node -e "const fs=require('fs'),os=require('os'),path=require('path');const cache=process.env.PUPPETEER_CACHE_DIR||path.join(os.homedir(),'.cache','puppeteer');function hasExe(d){for(const e of fs.readdirSync(d)){const p=path.join(d,e),s=fs.statSync(p);if(s.isDirectory()){if(hasExe(p))return true}else if(e.toLowerCase().endsWith('.exe'))return true}return false}let ok=false;try{if(fs.existsSync(require('puppeteer').executablePath())){ok=true;for(const b of fs.readdirSync(cache)){const bp=path.join(cache,b);if(!fs.statSync(bp).isDirectory())continue;for(const v of fs.readdirSync(bp)){const vp=path.join(bp,v);if(fs.statSync(vp).isDirectory()&&!hasExe(vp))ok=false}}}}catch(e){ok=false}process.exit(ok?0:1)" >nul 2>nul
 if errorlevel 1 (
   echo.
   echo Baixando o navegador usado pelo WhatsApp ^(so na primeira vez^)...
+  rem Um download interrompido antes deixa a pasta do navegador sem o .exe e o
+  rem puppeteer se recusa a rebaixar. Limpamos o cache parcial antes de tentar.
+  if exist "%USERPROFILE%\.cache\puppeteer" rmdir /s /q "%USERPROFILE%\.cache\puppeteer"
   call npx puppeteer browsers install chrome
   if errorlevel 1 (
-    echo.
-    echo [ERRO] Falha ao baixar o navegador. Verifique a internet e tente de novo.
-    pause
-    exit /b 1
+    echo [INFO] Falhou. Limpando o cache e tentando mais uma vez...
+    if exist "%USERPROFILE%\.cache\puppeteer" rmdir /s /q "%USERPROFILE%\.cache\puppeteer"
+    call npx puppeteer browsers install chrome
+    if errorlevel 1 (
+      echo.
+      echo [ERRO] Falha ao baixar o navegador. Verifique a internet e tente de novo.
+      pause
+      exit /b 1
+    )
   )
 )
 echo [OK] Navegador do WhatsApp pronto.
