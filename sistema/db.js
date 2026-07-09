@@ -98,6 +98,14 @@ function setClienteArquivoMd(clienteId, arquivoMd) {
 }
 
 /**
+ * Atualiza o nome de exibicao do cliente. Usado quando o escritorio cadastra o
+ * cliente pelo painel (getOrCreateCliente so grava o nome na criacao).
+ */
+function setClienteNome(clienteId, nome) {
+  db.prepare('UPDATE clientes SET nome_display = ? WHERE id = ?').run(nome, clienteId);
+}
+
+/**
  * Retorna a instituicao pelo id (ou undefined se nao existir).
  */
 function getInstituicao(id) {
@@ -174,6 +182,7 @@ module.exports = {
   initDb,
   getOrCreateCliente,
   setClienteArquivoMd,
+  setClienteNome,
   getInstituicao,
   listClientes,
   getCliente,

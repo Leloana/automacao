@@ -70,6 +70,49 @@ function criarMdCliente(numero, nomeDisplay) {
   return relativo;
 }
 
+/**
+ * Cria (se ainda nao existir) a ficha .md de um cliente JA PREENCHIDA pela
+ * secretaria no momento em que o numero e autorizado no painel. Retorna o
+ * caminho relativo (ex: "clientes/joao_silva_5514998689481.md").
+ *
+ * IMPORTANTE: todo o conteudo digitado por humano (area + observacoes) vai
+ * ABAIXO do marcador "Anotações do escritório", justamente para que o bot nunca
+ * o altere (ver atualizarMdCliente). A secao "Atendimento" comeca vazia, livre
+ * para o bot preencher conforme a conversa evolui.
+ *
+ * Se o arquivo JA existir (cliente re-adicionado), nao sobrescreve nada — apenas
+ * devolve o caminho — para preservar o que humanos ja escreveram. Ajustes finos
+ * ficam pelo editor "Contexto dos clientes" do painel.
+ */
+function criarFichaCliente(numero, nome, dados = {}) {
+  if (!fs.existsSync(CLIENTES_DIR)) {
+    fs.mkdirSync(CLIENTES_DIR, { recursive: true });
+  }
+
+  const slug = slugify(nome);
+  const base = slug ? `${slug}_${numero}` : `${numero}`;
+  const relativo = `clientes/${base}.md`;
+  const completo = path.join(CLIENTES_DIR, `${base}.md`);
+
+  if (!fs.existsSync(completo)) {
+    // Monta o bloco da secretaria (so as linhas que foram preenchidas).
+    const area = (dados.area || '').trim();
+    const observacoes = (dados.observacoes || '').trim();
+    const linhas = ['Cadastro pela secretaria:'];
+    if (area) linhas.push(`Área de interesse: ${area}`);
+    if (observacoes) linhas.push(`Observações: ${observacoes}`);
+    const anotacoes = linhas.length > 1 ? linhas.join('\n') : '';
+
+    fs.writeFileSync(
+      completo,
+      modeloMdCliente(nome, numero, { areaInteresse: '', observacoes: '', anotacoes }),
+      'utf8'
+    );
+  }
+
+  return relativo;
+}
+
 // Marcador que separa a parte preenchida pelo bot da parte do escritorio.
 // Tudo que vier DEPOIS desta linha nunca e alterado automaticamente.
 const MARCADOR_ESCRITORIO = '## Anotações do escritório (não alterado pelo bot)';
@@ -157,4 +200,4 @@ function escreverMarkdown(filepath, conteudo) {
   return true;
 }
 
-module.exports = { readMarkdown, criarMdCliente, atualizarMdCliente, escreverMarkdown };
+module.exports = { readMarkdown, criarMdCliente, criarFichaCliente, atualizarMdCliente, escreverMarkdown };

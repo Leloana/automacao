@@ -6,12 +6,15 @@
 
 const http = require('http');
 const qrcode = require('qrcode');
-const { lerConfig, salvarConfig } = require('./whitelist');
+const { lerConfig, salvarConfig, soDigitos } = require('./whitelist');
 const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require('./prompt');
 const { getAdvogados, salvarAdvogados } = require('./advogados');
-const { readMarkdown, escreverMarkdown } = require('./context');
+const { readMarkdown, escreverMarkdown, criarFichaCliente } = require('./context');
 const apikey = require('./apikey');
 const db = require('./db');
+
+// Instituicao usada ao cadastrar um cliente pelo painel (mesma logica do bot).
+const INSTITUICAO_PADRAO_ID = Number(process.env.INSTITUICAO_PADRAO_ID) || 1;
 
 // Estado da conexao do WhatsApp, atualizado pelo index.js via setStatus/setQR.
 // status: 'carregando' | 'qr' | 'conectado' | 'desconectado' | 'falha'
@@ -120,14 +123,19 @@ const HTML = `<!DOCTYPE html>
     <div class="status" id="status-trocar"></div>
   </div>
 
-  <!-- Whitelist -->
+  <!-- Whitelist / cadastro de clientes -->
   <div class="card">
-    <h2>Whitelist de números</h2>
-    <p class="sub">O bot responde <b>apenas</b> os números desta lista.</p>
+    <h2>Clientes autorizados</h2>
+    <p class="sub">O bot responde <b>apenas</b> os números desta lista. Ao adicionar um cliente, você já cria a ficha dele — assim o bot sabe com quem está falando desde a primeira mensagem.</p>
 
-    <div class="add">
-      <input type="text" id="novo" placeholder="Ex: 5514998689481" />
-      <button class="btn-add" onclick="adicionar()">Adicionar</button>
+    <div class="adv">
+      <div class="row">
+        <div class="field"><label>Número (WhatsApp)</label><input type="text" id="novo" placeholder="Ex: 5514998689481" /></div>
+        <div class="field"><label>Nome</label><input type="text" id="novo-nome" placeholder="Ex: João Silva" /></div>
+      </div>
+      <div class="field"><label>Área de interesse (opcional)</label><input type="text" id="novo-area" placeholder="Ex: trabalhista" /></div>
+      <div class="field" style="margin-top:8px"><label>Observações (opcional)</label><textarea id="novo-obs" rows="3" placeholder="Resumo do caso, o que já se sabe sobre o cliente..."></textarea></div>
+      <div class="adv-foot"><button class="btn-add" onclick="adicionar()">+ Adicionar cliente</button></div>
     </div>
 
     <ul id="lista"></ul>
@@ -135,7 +143,7 @@ const HTML = `<!DOCTYPE html>
 
     <button class="btn-save" onclick="salvar()">Salvar alterações</button>
     <div class="status" id="status"></div>
-    <p class="sub" style="margin-top:16px">Formato: país + DDD + número, só dígitos. Ex: <code>5514998689481</code></p>
+    <p class="sub" style="margin-top:16px">Número: país + DDD + número, só dígitos (ex: <code>5514998689481</code>). O que você escrever aqui vai para as anotações do escritório na ficha e <b>nunca é alterado pelo bot</b>. Para remover alguém, use "Remover" e clique em "Salvar alterações".</p>
   </div>
 
   <!-- Personalidade do bot -->
@@ -223,12 +231,28 @@ const HTML = `<!DOCTYPE html>
       ul.appendChild(li);
     });
   }
-  function adicionar(){
+  async function adicionar(){
     const inp = document.getElementById('novo');
+    const nome = document.getElementById('novo-nome').value.trim();
     const n = soDigitos(inp.value);
     if (n.length < 12 || n.length > 13) { setStatus('Número inválido. Use país+DDD+número (12 ou 13 dígitos).', false); return; }
+    if (!nome) { setStatus('Informe o nome do cliente.', false); return; }
     if (numeros.includes(n)) { setStatus('Esse número já está na lista.', false); return; }
-    numeros.push(n); inp.value = ''; render(); setStatus('', true);
+    const area = document.getElementById('novo-area').value.trim();
+    const observacoes = document.getElementById('novo-obs').value.trim();
+    try {
+      const r = await fetch('/api/whitelist/cliente', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ numero: n, nome, area, observacoes }) });
+      const cfg = await r.json();
+      if (cfg.erro) return setStatus('Erro: ' + cfg.erro, false);
+      numeros = cfg.numeros || [];
+      render();
+      inp.value = '';
+      document.getElementById('novo-nome').value = '';
+      document.getElementById('novo-area').value = '';
+      document.getElementById('novo-obs').value = '';
+      setStatus('Cliente adicionado! Ficha criada e já vale (sem reiniciar).', true);
+      carregarClientes();
+    } catch (e) { setStatus('Erro ao adicionar: ' + e.message, false); }
   }
   function setStatus(msg, ok){
     const s = document.getElementById('status');
@@ -524,6 +548,35 @@ function iniciarPainel(porta = 3000) {
     // Salvar a whitelist.
     if (req.method === 'POST' && req.url === '/api/whitelist') {
       return lerCorpo(req, res, (corpo) => salvarConfig(corpo));
+    }
+
+    // Cadastrar um cliente: autoriza o numero na whitelist E ja cria a ficha
+    // (.md) preenchida pela secretaria, para o bot conhece-lo desde a 1a mensagem.
+    if (req.method === 'POST' && req.url === '/api/whitelist/cliente') {
+      return lerCorpo(req, res, (corpo) => {
+        const numero = soDigitos(corpo.numero);
+        if (numero.length < 12 || numero.length > 13) {
+          throw new Error('Número inválido. Use país + DDD + número (12 ou 13 dígitos).');
+        }
+        const nome = String(corpo.nome || '').trim();
+        if (!nome) throw new Error('Informe o nome do cliente.');
+
+        // 1) Autoriza o numero (salvarConfig normaliza e remove duplicados).
+        const cfg = lerConfig();
+        salvarConfig({ numeros: [...cfg.numeros, numero] });
+
+        // 2) Cria/recupera o cadastro e grava o nome informado.
+        const cliente = db.getOrCreateCliente(numero, nome, INSTITUICAO_PADRAO_ID);
+        db.setClienteNome(cliente.id, nome);
+
+        // 3) Cria a ficha .md com o briefing da secretaria (abaixo do marcador,
+        //    imutavel pelo bot) e vincula ao cadastro.
+        const ficha = criarFichaCliente(numero, nome, { area: corpo.area, observacoes: corpo.observacoes });
+        db.setClienteArquivoMd(cliente.id, ficha);
+
+        // Devolve a whitelist atualizada para o painel recarregar a lista.
+        return lerConfig();
+      });
     }
 
     // Ler a personalidade do bot (texto atual + valor padrao de fabrica).
