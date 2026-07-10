@@ -8,7 +8,8 @@ reexplorar tudo a cada sessão.
 Bot de WhatsApp para **atendimento jurídico inicial** do escritório *Ferreira Ramos
 Advocacia*. Uma "secretária virtual" que acolhe o cliente, faz a **triagem** do caso e,
 quando necessário, **escala** para um advogado humano. Usa a **API DeepSeek** (via SDK da
-OpenAI) para gerar as respostas e **SQLite** para persistência.
+OpenAI) para gerar as respostas, a **API Google Gemini** (opcional) para transcrever
+áudios e descrever imagens, e **SQLite** para persistência.
 
 - Roda **no Windows**, na máquina do escritório, iniciado por `iniciar.bat` (na raiz).
 - Stack: Node.js (CommonJS), `whatsapp-web.js` (Puppeteer/Chromium headless), `openai`,
@@ -44,7 +45,8 @@ sistema/
   mensagens.js         # textos de encaminhamento editáveis (mensagens.json + defaults)
   avisos.js            # buffer em memória de erros/avisos amigáveis (mostrados no painel)
   datajud.js           # consulta de andamento processual (DataJud/CNJ) via HTTP
-  apikey.js            # grava/aplica a chave DeepSeek no .env (usado pelo painel)
+  midia.js             # transcreve áudio / descreve imagem via Gemini (fetch nativo)
+  apikey.js            # grava/aplica as chaves DeepSeek e Gemini no .env (painel)
   painel.js            # servidor HTTP: SPA com navegação lateral + endpoints JSON
   logger.js            # espelha console.* em log.txt (com rotação) + erros não tratados
   prompt/context .md   # instituicoes/*.md e clientes/*.md (contexto injetado no prompt)
@@ -68,12 +70,18 @@ responde de fato (evita F5 em PCs lentos).
    `clientes`), o bot fica em **silêncio total** — não responde, não trata mídia, não
    enfileira nem registra. Serve para o advogado assumir o atendimento humano. Checado em
    `handleMessage` via `db.getClienteByNumero` logo após a whitelist.
-4. **Mídia** (áudio/imagem/vídeo/documento): o bot não processa; avisa o cliente e alerta
-   o número padrão, com cooldown por número (`MIDIA_COOLDOWN_MS`).
+4. **Mídia**: com `GEMINI_API_KEY` configurada, áudio (`ptt`/`audio`) é **transcrito** e
+   imagem **descrita** ([midia.js](sistema/midia.js)); o texto rotulado ("[Áudio enviado
+   pelo cliente — transcrição automática]...") entra no fluxo normal via
+   `enfileirarMensagem` — a DeepSeek segue fazendo a triagem. Sem chave, ou para
+   vídeo/documento, ou em falha/arquivo grande (`MIDIA_MAX_MB`), cai no comportamento
+   antigo (`tratarMidia`): avisa o cliente e alerta o número padrão, com cooldown por
+   número (`MIDIA_COOLDOWN_MS`).
 5. **Debounce** (`DEBOUNCE_MS`, ~5s): mensagens em sequência são agrupadas num único
    atendimento (`enfileirarMensagem`/`pendentes`) e viram uma só resposta.
 6. `processarMensagens`: monta o array `[system, ...histórico, user]`, chama
-   `chamarDeepSeek` (`deepseek-chat`, `temperature 0.7`, `max_tokens 600`, 3 tentativas).
+   `chamarDeepSeek` (`deepseek-v4-flash`, `temperature 0.7`, `max_tokens 600`, 3
+   tentativas — o antigo `deepseek-chat` foi descontinuado pela DeepSeek em 24/07/2026).
    Se o modelo pedir `consultar_processo`, consulta o DataJud e repergunta (máx. 2
    iterações).
 7. Se `escalar: true` → escolhe advogado por área ([advogados.js](sistema/advogados.js)),
@@ -123,7 +131,10 @@ remove ```` ``` ````, extrai o primeiro `{...}`. **Não use `response_format: js
 
 - `DEEPSEEK_API_KEY` — chave da API (também gravável pelo painel via
   [apikey.js](sistema/apikey.js); o bot sobe sem ela e falha só nas respostas).
-- `DEEPSEEK_MODEL` (padrão `deepseek-chat`), `INSTITUICAO_PADRAO_ID` (1).
+- `DEEPSEEK_MODEL` (padrão `deepseek-v4-flash`), `INSTITUICAO_PADRAO_ID` (1).
+- `GEMINI_API_KEY` — chave do Google para áudio/imagem (opcional; também gravável pelo
+  painel). `GEMINI_MODEL` (padrão `gemini-flash-lite-latest` — alias que segue o
+  flash-lite estável mais recente; versões fixas somem para contas novas), `MIDIA_MAX_MB` (15).
 - `HISTORICO_LIMIT` (30) — tamanho da janela de histórico.
 - `DEBOUNCE_MS` (5000), `MIDIA_COOLDOWN_MS` (60000), `DATAJUD_API_URL`,
   `PAINEL_PORTA` (3000).
@@ -138,7 +149,9 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
   botão na sidebar tem um "dot" que reflete o status.
 - **Avisos** — lista os erros/avisos amigáveis ([avisos.js](sistema/avisos.js)); badge com
   contador. Poll a cada 5s.
-- **Chave da API** — grava/aplica a chave DeepSeek ([apikey.js](sistema/apikey.js)).
+- **Chave da API** — grava/aplica a chave DeepSeek e a chave do Google/Gemini para
+  áudio/imagem ([apikey.js](sistema/apikey.js)); a do Google é opcional (banner amarelo
+  quando ausente, não vermelho).
 - **Criar cliente** — só um formulário: autoriza o número na whitelist **e** cria a ficha
   `.md` do cliente (`criarFichaCliente`), com nome/área/observações preenchidos pela
   secretária. Não lista clientes (há muitos).

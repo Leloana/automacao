@@ -167,7 +167,20 @@ const HTML = `<!DOCTYPE html>
     </div>
     <button class="btn-save" onclick="salvarApiKey()">Salvar chave</button>
     <div class="status" id="status-apikey"></div>
-    <p class="sub" style="margin-top:16px">A chave fica guardada só neste computador (arquivo <code>.env</code>) e nunca vai para a internet nem para o repositório.</p>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:24px 0" />
+
+    <h2>Chave do Google — áudios e imagens<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Opcional. Com esta chave (Google Gemini) o bot passa a ouvir os áudios e ver as imagens que os clientes enviam, e responde normalmente. Sem ela, o bot avisa que uma pessoa vai responder, como antes.</span></span></h2>
+    <p class="sub">Opcional. Com ela o bot <b>entende áudios e imagens</b> enviados pelos clientes. Sem ela, esses casos vão para atendimento humano (como antes). Crie a chave em <code>aistudio.google.com</code>.</p>
+    <div id="gemini-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="gemini-estado-txt">Verificando...</span></div>
+    <div class="add">
+      <input type="password" id="gemini-key" placeholder="Cole aqui a chave do Google (ex: AIza...)" autocomplete="off" />
+      <button class="btn-add" onclick="mostrarChaveGemini()" title="Mostrar/ocultar">👁</button>
+    </div>
+    <button class="btn-save" onclick="salvarGeminiKey()">Salvar chave do Google</button>
+    <div class="status" id="status-gemini"></div>
+
+    <p class="sub" style="margin-top:16px">As chaves ficam guardadas só neste computador (arquivo <code>.env</code>) e nunca vão para a internet nem para o repositório.</p>
   </div>
 
   <!-- Conexao do WhatsApp -->
@@ -597,6 +610,44 @@ const HTML = `<!DOCTYPE html>
     } catch (e) { setStatusApiKey('Erro ao salvar: ' + e.message, false); }
   }
 
+  // ---- Chave do Google/Gemini (audios e imagens) ----
+  function setStatusGemini(msg, ok){
+    const s = document.getElementById('status-gemini');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  function mostrarChaveGemini(){
+    const inp = document.getElementById('gemini-key');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+  async function carregarGeminiKey(){
+    try {
+      const r = await fetch('/api/apikey-gemini');
+      const d = await r.json();
+      const est = document.getElementById('gemini-estado');
+      const txt = document.getElementById('gemini-estado-txt');
+      if (d.configurada) {
+        est.className = 'banner b-conectado';
+        txt.textContent = 'Chave configurada (' + d.mascara + ') — o bot entende áudios e imagens.';
+      } else {
+        // Amarelo (nao vermelho): a chave e opcional, o bot funciona sem ela.
+        est.className = 'banner b-qr';
+        txt.textContent = 'Sem chave — áudios e imagens vão para atendimento humano.';
+      }
+    } catch (e) { /* ignora */ }
+  }
+  async function salvarGeminiKey(){
+    const chave = document.getElementById('gemini-key').value.trim();
+    if (!chave) return setStatusGemini('Cole a chave antes de salvar.', false);
+    try {
+      const r = await fetch('/api/apikey-gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave }) });
+      const d = await r.json();
+      if (d.erro) return setStatusGemini('Erro: ' + d.erro, false);
+      document.getElementById('gemini-key').value = '';
+      setStatusGemini('Chave salva! Os próximos áudios e imagens já serão entendidos (sem reiniciar).', true);
+      carregarGeminiKey();
+    } catch (e) { setStatusGemini('Erro ao salvar: ' + e.message, false); }
+  }
+
   // ---- Mensagens de encaminhamento ----
   let msgPadrao = { cliente: '', advogado: '' };
   function setStatusMsg(msg, ok){
@@ -742,6 +793,7 @@ const HTML = `<!DOCTYPE html>
   mostrarSecao('sec-conexao'); // secao inicial
 
   carregarApiKey();
+  carregarGeminiKey();
   carregarPersonalidade();
   carregarMensagens();
   carregarAdvs();
@@ -802,6 +854,16 @@ function iniciarPainel(porta = 3000) {
     // Salvar a chave da API. Aplica na hora, sem reiniciar o bot.
     if (req.method === 'POST' && req.url === '/api/apikey') {
       return lerCorpo(req, res, (corpo) => apikey.salvarChave(corpo.chave));
+    }
+
+    // Estado da chave do Google/Gemini (audios e imagens).
+    if (req.method === 'GET' && req.url === '/api/apikey-gemini') {
+      return enviarJson(res, 200, apikey.statusGemini());
+    }
+
+    // Salvar a chave do Google/Gemini. Aplica na hora, sem reiniciar o bot.
+    if (req.method === 'POST' && req.url === '/api/apikey-gemini') {
+      return lerCorpo(req, res, (corpo) => apikey.salvarChaveGemini(corpo.chave));
     }
 
     // Ler a whitelist.

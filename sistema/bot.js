@@ -11,6 +11,7 @@ const { escolherAdvogado, getAreasDisponiveis } = require('./advogados');
 const { consultarProcesso } = require('./datajud');
 const { numeroPermitido } = require('./whitelist');
 const { renderMensagemCliente, renderMensagemAdvogado } = require('./mensagens');
+const midia = require('./midia');
 const avisos = require('./avisos');
 
 // Identifica se um erro da API e de autenticacao (chave invalida/ausente).
@@ -88,9 +89,9 @@ function formatarResultadoProcesso(r) {
 }
 
 // Modelo da DeepSeek. Configuravel pelo .env (DEEPSEEK_MODEL).
-// Opcoes na API: deepseek-chat (recomendado: rapido e barato), deepseek-v4-flash,
-// deepseek-v4-pro, deepseek-reasoner.
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+// Padrao: deepseek-v4-flash (rapido e barato). O nome antigo "deepseek-chat"
+// foi descontinuado pela DeepSeek em 24/07/2026. Alternativa: deepseek-v4-pro.
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
 
 // Instituicao padrao para clientes novos (definida no .env).
 const INSTITUICAO_PADRAO_ID = Number(process.env.INSTITUICAO_PADRAO_ID || 1);
@@ -218,10 +219,16 @@ async function handleMessage(client, message) {
     return;
   }
 
-  // 4) Midia (audio, imagem, video, documento): o bot nao processa o conteudo.
-  // Avisa o cliente que uma pessoa vai responder e alerta o numero padrao.
+  // 4) Midia. Com a chave do Google configurada, audios sao transcritos e
+  // imagens descritas (Gemini) e o texto entra no fluxo normal de atendimento.
+  // Sem chave (ou para video/documento), mantem o comportamento antigo: avisa o
+  // cliente que uma pessoa vai responder e alerta o numero padrao.
   if (TIPOS_MIDIA.includes(message.type)) {
-    await tratarMidia(client, message, numero, nomeDisplay);
+    if (TIPOS_MIDIA_IA.includes(message.type) && midia.temGeminiKey()) {
+      await tratarMidiaComIA(client, message, from, numero, nomeDisplay);
+    } else {
+      await tratarMidia(client, message, numero, nomeDisplay);
+    }
     return;
   }
 
@@ -236,6 +243,10 @@ async function handleMessage(client, message) {
 // Tipos de midia que recebem o aviso "nao consigo processar" + alerta.
 const TIPOS_MIDIA = ['image', 'audio', 'ptt', 'video', 'document'];
 
+// Tipos que o bot processa com a chave do Google (Gemini) configurada:
+// audios sao transcritos e imagens descritas. Video/documento seguem no aviso.
+const TIPOS_MIDIA_IA = ['image', 'audio', 'ptt'];
+
 // Rotulo amigavel de cada tipo, usado no aviso ao advogado.
 const NOMES_MIDIA = {
   image: 'imagem',
@@ -248,6 +259,47 @@ const NOMES_MIDIA = {
 // Cooldown por numero para nao floodar cliente/advogado numa rajada de midias.
 const ultimaMidiaPorNumero = new Map(); // numero -> timestamp (ms)
 const MIDIA_COOLDOWN_MS = Number(process.env.MIDIA_COOLDOWN_MS || 60000);
+
+/**
+ * Trata audio/imagem com a IA multimodal (Gemini): baixa a midia, converte em
+ * texto (transcricao ou descricao) e enfileira esse texto no fluxo normal —
+ * debounce, historico e triagem da DeepSeek seguem identicos ao de uma mensagem
+ * digitada. Qualquer falha cai no fluxo antigo de aviso (tratarMidia).
+ */
+async function tratarMidiaComIA(client, message, from, numero, nomeDisplay) {
+  const ehAudio = message.type !== 'image';
+  try {
+    const media = await message.downloadMedia();
+    if (!media || !media.data) throw new Error('Não foi possível baixar a mídia');
+
+    // Tamanho do binario a partir do base64 (~3/4 do comprimento).
+    const bytes = Math.floor(media.data.length * 3 / 4);
+    if (bytes > midia.MIDIA_MAX_BYTES) {
+      console.warn(`[MIDIA-IA] ${numero}: ${message.type} muito grande (${Math.round(bytes / 1024 / 1024)}MB); caindo no aviso padrao.`);
+      return tratarMidia(client, message, numero, nomeDisplay);
+    }
+
+    const conteudo = ehAudio
+      ? await midia.transcreverAudio(media.data, media.mimetype)
+      : await midia.descreverImagem(media.data, media.mimetype);
+
+    // Rotula a origem para o modelo saber que o texto veio de uma midia.
+    let texto = ehAudio
+      ? `[Áudio enviado pelo cliente — transcrição automática]\n${conteudo}`
+      : `[Imagem enviada pelo cliente — descrição automática]\n${conteudo}`;
+    const legenda = (message.body || '').trim();
+    if (legenda) texto += `\n[Legenda escrita pelo cliente]: ${legenda}`;
+
+    console.log(`[MIDIA-IA] ${numero}: ${message.type} convertido em texto (${conteudo.length} caracteres).`);
+    enfileirarMensagem(client, from, texto, message, numero, nomeDisplay);
+  } catch (e) {
+    console.error(`[MIDIA-IA] Falha ao processar ${message.type} de ${numero}:`, e.message);
+    avisos.registrar('aviso', 'Não consegui entender um áudio ou imagem de um cliente.',
+      `Cliente ${nomeDisplay || numero}. Pode ser instabilidade do serviço do Google ou problema na chave (aba "Chave da API"). ` +
+      'O atendimento seguiu o fluxo padrão: o cliente foi avisado de que uma pessoa vai responder e o advogado foi alertado.');
+    await tratarMidia(client, message, numero, nomeDisplay);
+  }
+}
 
 /**
  * Trata uma mensagem de midia: avisa o cliente que o assistente nao consegue
