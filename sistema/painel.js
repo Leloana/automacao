@@ -93,12 +93,18 @@ const HTML = `<!DOCTYPE html>
   .status { margin-top: 12px; font-size: 14px; min-height: 20px; }
   .ok { color: #22c55e; } .erro { color: #ef4444; }
   code { background:#0f172a; padding:2px 6px; border-radius:4px; }
+  /* Icone de ajuda (ⓘ) com tooltip no hover, ao lado do titulo de cada card. */
+  h1, h2 { display: flex; align-items: center; }
+  .info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 8px; border-radius: 50%; border: 1px solid #475569; color: #94a3b8; font-size: 12px; font-style: italic; font-weight: 700; font-family: Georgia, 'Times New Roman', serif; cursor: help; user-select: none; flex: none; }
+  .info:hover, .info:focus { background: #334155; color: #e2e8f0; outline: none; }
+  .info .tip { position: absolute; top: 26px; left: 0; z-index: 20; width: 280px; max-width: 78vw; background: #0b1220; color: #cbd5e1; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 400; font-style: normal; line-height: 1.5; letter-spacing: normal; text-align: left; box-shadow: 0 10px 28px rgba(0,0,0,.5); opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity .12s ease, transform .12s ease; pointer-events: none; }
+  .info:hover .tip, .info:focus .tip { opacity: 1; visibility: visible; transform: translateY(0); }
 </style>
 </head>
 <body>
   <!-- Chave da API (DeepSeek) -->
   <div class="card">
-    <h2>Chave da API (DeepSeek)</h2>
+    <h2>Chave da API (DeepSeek)<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">A chave de acesso ao serviço de inteligência artificial (DeepSeek) que gera as respostas do bot. Sem ela, o bot conecta ao WhatsApp mas não consegue responder. A chave fica guardada só neste computador.</span></span></h2>
     <p class="sub">Sem esta chave o bot conecta ao WhatsApp, mas <b>não consegue responder</b>. Cole a chave fornecida pelo escritório e clique em Salvar.</p>
     <div id="apikey-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="apikey-estado-txt">Verificando...</span></div>
     <div class="add">
@@ -112,7 +118,7 @@ const HTML = `<!DOCTYPE html>
 
   <!-- Conexao do WhatsApp -->
   <div class="card">
-    <h1>Conexão do WhatsApp</h1>
+    <h1>Conexão do WhatsApp<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Mostra se o bot está conectado ao WhatsApp do escritório. Se aparecer um QR code, escaneie com o celular para conectar. Use "Trocar de WhatsApp" para conectar outro número.</span></span></h1>
     <p class="sub">Status da conexão do bot com o WhatsApp do escritório.</p>
     <div id="banner" class="banner b-carregando"><span class="dot"></span><span id="banner-txt">Carregando...</span></div>
     <div id="qrbox" class="qrbox" style="display:none">
@@ -126,7 +132,7 @@ const HTML = `<!DOCTYPE html>
 
   <!-- Whitelist / cadastro de clientes -->
   <div class="card">
-    <h2>Clientes autorizados</h2>
+    <h2>Clientes autorizados<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">A lista de números que o bot atende — ele responde apenas quem está aqui. Ao adicionar um cliente, você já preenche a ficha dele, para o bot saber com quem está falando desde a primeira mensagem.</span></span></h2>
     <p class="sub">O bot responde <b>apenas</b> os números desta lista. Ao adicionar um cliente, você já cria a ficha dele — assim o bot sabe com quem está falando desde a primeira mensagem.</p>
 
     <div class="adv">
@@ -149,7 +155,7 @@ const HTML = `<!DOCTYPE html>
 
   <!-- Personalidade do bot -->
   <div class="card">
-    <h2>Personalidade do bot</h2>
+    <h2>Personalidade do bot<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Define o tom, o estilo e o jeito de falar do bot com os clientes. Edite para deixar as respostas mais formais, mais calorosas, etc. As mudanças valem na hora, sem reiniciar.</span></span></h2>
     <p class="sub">Tom, estilo e papel do assistente. Use <code>{nomeInstituicao}</code> para inserir o nome do escritório. As alterações valem na hora, sem reiniciar.</p>
     <textarea id="personalidade" rows="14" placeholder="Descreva como o bot deve se comportar..."></textarea>
     <button class="btn-save" onclick="salvarPersonalidade()">Salvar personalidade</button>
@@ -159,7 +165,7 @@ const HTML = `<!DOCTYPE html>
 
   <!-- Mensagens de encaminhamento -->
   <div class="card">
-    <h2>Mensagens de encaminhamento</h2>
+    <h2>Mensagens de encaminhamento<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Os textos enviados quando o bot passa o atendimento para um advogado: a mensagem ao cliente e o alerta ao advogado. Use os campos entre chaves (ex.: {nome}) para inserir dados automaticamente.</span></span></h2>
     <p class="sub">Textos enviados quando o bot encaminha o atendimento a um advogado. As alterações valem na hora, sem reiniciar.</p>
 
     <div style="margin-bottom:6px;font-size:13px;color:#94a3b8">Mensagem ao cliente</div>
@@ -177,7 +183,7 @@ const HTML = `<!DOCTYPE html>
 
   <!-- Advogados de redirecionamento -->
   <div class="card">
-    <h2>Advogados de redirecionamento</h2>
+    <h2>Advogados de redirecionamento<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Quem recebe os atendimentos encaminhados, por área do direito. Quando o bot escala um caso, escolhe o advogado pela área; sem área correspondente, usa o marcado como padrão.</span></span></h2>
     <p class="sub">Quando o bot escala um atendimento, escolhe o advogado pela <b>área</b>. Sem área correspondente, usa o marcado como <b>padrão</b>. As alterações valem na hora.</p>
 
     <div id="advs"></div>
@@ -191,7 +197,7 @@ const HTML = `<!DOCTYPE html>
 
   <!-- Atendimento por cliente (pausar/reativar o bot) -->
   <div class="card">
-    <h2>Atendimento por cliente</h2>
+    <h2>Atendimento por cliente<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Liga ou desliga o bot para cada cliente. Ao encaminhar para um advogado, o bot pausa sozinho e uma pessoa assume a conversa pelo WhatsApp; reative quando quiser que o bot volte a atender.</span></span></h2>
     <p class="sub">Ligue ou desligue o bot para cada cliente. Ao encaminhar para um advogado, o bot <b>pausa sozinho</b> — reative quando quiser que ele volte a atender. Enquanto pausado, uma pessoa responde pelo WhatsApp e o bot fica em silêncio.</p>
 
     <div class="add" style="justify-content:flex-end">
@@ -205,7 +211,7 @@ const HTML = `<!DOCTYPE html>
 
   <!-- Contexto dos clientes -->
   <div class="card">
-    <h2>Contexto dos clientes</h2>
+    <h2>Contexto dos clientes<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">O que o bot sabe sobre cada cliente (assunto, histórico do caso). Edite para corrigir algo que a IA tenha entendido errado — o bot usa este texto como contexto nas próximas mensagens.</span></span></h2>
     <p class="sub">O que o bot sabe sobre cada cliente. Edite para corrigir algo que a IA tenha entendido errado. O bot usa este texto como contexto nas próximas mensagens.</p>
 
     <div class="add">
