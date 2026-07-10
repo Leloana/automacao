@@ -65,8 +65,22 @@ function initDb() {
   db.prepare(`
     INSERT OR IGNORE INTO instituicoes (id, slug, nome, arquivo_md, numero_humano, ativo)
     VALUES (1, 'ferreira_ramos', 'Ferreira Ramos Advocacia',
-            'instituicoes/exemplo_instituicao.md', '5514998689481', 1)
+            'instituicoes/escritorio.md', '5514998689481', 1)
   `).run();
+
+  // Migracao: o contexto do escritorio passou a ser editavel pelo painel (aba
+  // "Escritório"). O arquivo versionado no git (exemplo_instituicao.md) vira
+  // apenas modelo; a copia local (escritorio.md, git-ignored) e a editada —
+  // senao o "git pull" do iniciar.bat conflitaria com as edicoes do painel.
+  db.prepare(`
+    UPDATE instituicoes SET arquivo_md = 'instituicoes/escritorio.md'
+    WHERE arquivo_md = 'instituicoes/exemplo_instituicao.md'
+  `).run();
+  const escritorioMd = path.join(__dirname, 'instituicoes', 'escritorio.md');
+  const modeloMd = path.join(__dirname, 'instituicoes', 'exemplo_instituicao.md');
+  if (!fs.existsSync(escritorioMd) && fs.existsSync(modeloMd)) {
+    fs.copyFileSync(modeloMd, escritorioMd);
+  }
 
   // Migracao: CREATE TABLE IF NOT EXISTS nao altera uma tabela ja existente, entao
   // adicionamos a coluna "pausado" (atendimento humano) so quando ela faltar.

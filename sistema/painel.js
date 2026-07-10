@@ -11,6 +11,7 @@ const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require(
 const { getMensagens, salvarMensagens, MSG_CLIENTE_PADRAO, MSG_ADVOGADO_PADRAO } = require('./mensagens');
 const { getAdvogados, salvarAdvogados } = require('./advogados');
 const { readMarkdown, escreverMarkdown, criarFichaCliente } = require('./context');
+const escritorio = require('./escritorio');
 const apikey = require('./apikey');
 const db = require('./db');
 const avisos = require('./avisos');
@@ -132,6 +133,7 @@ const HTML = `<!DOCTYPE html>
       <button class="nav-btn" data-target="sec-conexao"><span class="ic">📱</span><span class="lbl">Conexão</span><span class="nav-dot" id="nav-dot"></span></button>
       <button class="nav-btn" data-target="sec-avisos"><span class="ic">🔔</span><span class="lbl">Avisos</span><span class="nav-badge" id="nav-badge-avisos" style="display:none">0</span></button>
       <button class="nav-btn" data-target="sec-apikey"><span class="ic">🔑</span><span class="lbl">Chave da API</span></button>
+      <button class="nav-btn" data-target="sec-escritorio"><span class="ic">🏢</span><span class="lbl">Escritório</span></button>
       <button class="nav-btn" data-target="sec-clientes"><span class="ic">➕</span><span class="lbl">Criar cliente</span></button>
       <button class="nav-btn" data-target="sec-contexto"><span class="ic">👥</span><span class="lbl">Clientes</span></button>
       <button class="nav-btn" data-target="sec-atendimento"><span class="ic">⏯️</span><span class="lbl">Atendimento (pausar)</span></button>
@@ -195,6 +197,29 @@ const HTML = `<!DOCTYPE html>
     <button class="btn-trocar" onclick="trocarWhatsapp()">Trocar de WhatsApp</button>
     <p class="sub" style="margin:8px 0 0">Desconecta a conta atual, apaga a sessão e gera um novo QR code para outro número escanear.</p>
     <div class="status" id="status-trocar"></div>
+  </div>
+
+  <!-- Escritorio (areas atendidas + informacoes gerais) -->
+  <div class="card hidden" id="sec-escritorio">
+    <h2>Escritório<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">O que o bot sabe sobre o escritório: as áreas que vocês atendem e as informações gerais (horário, endereço, orientações). É daqui que ele responde se o escritório atende ou não um assunto — mantenha as áreas completas.</span></span></h2>
+    <p class="sub">O que o bot sabe sobre o escritório. É daqui que ele responde <b>quais áreas vocês atendem</b> — se uma área estiver faltando, o bot pode dizer ao cliente que o escritório não atende. As alterações valem na hora, sem reiniciar.</p>
+
+    <div style="margin-bottom:6px;font-size:13px;color:#94a3b8">Áreas que o escritório atende (separadas por vírgula)</div>
+    <div class="add">
+      <input type="text" id="esc-areas" placeholder="Ex: trabalhista, família, previdenciário" />
+    </div>
+
+    <div style="margin-bottom:6px;font-size:13px;color:#94a3b8">Informações do escritório (horário, endereço, perguntas frequentes, orientações ao bot)</div>
+    <textarea id="esc-descricao" rows="12" placeholder="Ex:
+Horário de atendimento: Segunda a Sexta, 9h às 18h
+Localização: Londrina, PR
+
+## Perguntas frequentes
+- Divórcio consensual: pode ser feito em cartório se não houver filhos menores"></textarea>
+
+    <button class="btn-save" onclick="salvarEscritorio()">Salvar escritório</button>
+    <div class="status" id="status-esc"></div>
+    <p class="sub" style="margin-top:16px">Dica: cadastre também um advogado com cada área na aba <b>Advogados</b>, para o bot saber a quem encaminhar os casos.</p>
   </div>
 
   <!-- Whitelist / cadastro de clientes -->
@@ -648,6 +673,33 @@ const HTML = `<!DOCTYPE html>
     } catch (e) { setStatusGemini('Erro ao salvar: ' + e.message, false); }
   }
 
+  // ---- Escritorio (areas atendidas + informacoes gerais) ----
+  function setStatusEsc(msg, ok){
+    const s = document.getElementById('status-esc');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  async function carregarEscritorio(){
+    try {
+      const r = await fetch('/api/escritorio');
+      const d = await r.json();
+      if (d.erro) return setStatusEsc('Erro ao carregar: ' + d.erro, false);
+      document.getElementById('esc-areas').value = d.areas || '';
+      document.getElementById('esc-descricao').value = d.descricao || '';
+    } catch (e) { setStatusEsc('Erro ao carregar: ' + e.message, false); }
+  }
+  async function salvarEscritorio(){
+    const areas = document.getElementById('esc-areas').value;
+    const descricao = document.getElementById('esc-descricao').value;
+    try {
+      const r = await fetch('/api/escritorio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ areas, descricao }) });
+      const d = await r.json();
+      if (d.erro) return setStatusEsc('Erro: ' + d.erro, false);
+      document.getElementById('esc-areas').value = d.areas || '';
+      document.getElementById('esc-descricao').value = d.descricao || '';
+      setStatusEsc('Escritório salvo! Já vale para as próximas mensagens.', true);
+    } catch (e) { setStatusEsc('Erro ao salvar: ' + e.message, false); }
+  }
+
   // ---- Mensagens de encaminhamento ----
   let msgPadrao = { cliente: '', advogado: '' };
   function setStatusMsg(msg, ok){
@@ -794,6 +846,7 @@ const HTML = `<!DOCTYPE html>
 
   carregarApiKey();
   carregarGeminiKey();
+  carregarEscritorio();
   carregarPersonalidade();
   carregarMensagens();
   carregarAdvs();
@@ -916,6 +969,20 @@ function iniciarPainel(porta = 3000) {
         salvarConfig({ numeros: cfg.numeros.filter((n) => !vars.includes(n)) });
         return { ok: true };
       });
+    }
+
+    // Ler os dados do escritorio (areas atendidas + descricao) do .md da instituicao.
+    if (req.method === 'GET' && req.url === '/api/escritorio') {
+      try {
+        return enviarJson(res, 200, escritorio.getEscritorio());
+      } catch (e) {
+        return enviarJson(res, 500, { erro: e.message });
+      }
+    }
+
+    // Salvar os dados do escritorio. Regrava o .md; vale na hora, sem reiniciar.
+    if (req.method === 'POST' && req.url === '/api/escritorio') {
+      return lerCorpo(req, res, (corpo) => escritorio.salvarEscritorio(corpo));
     }
 
     // Ler a personalidade do bot (texto atual + valor padrao de fabrica).
