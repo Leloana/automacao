@@ -46,6 +46,7 @@ sistema/
   mensagens.js         # textos de encaminhamento editáveis (mensagens.json + defaults)
   avisos.js            # buffer em memória de erros/avisos amigáveis (mostrados no painel)
   datajud.js           # consulta de andamento processual (DataJud/CNJ) via HTTP
+  crm.js               # API pública do escritório: resolve CPF/nome → nº(s) CNJ
   midia.js             # transcreve áudio / descreve imagem via Gemini (fetch nativo)
   apikey.js            # grava/aplica as chaves DeepSeek e Gemini no .env (painel)
   painel.js            # servidor HTTP: SPA com navegação lateral + endpoints JSON
@@ -84,7 +85,11 @@ responde de fato (evita F5 em PCs lentos).
    `chamarDeepSeek` (`deepseek-v4-flash`, `temperature 0.7`, `max_tokens 600`, 3
    tentativas — o antigo `deepseek-chat` foi descontinuado pela DeepSeek em 24/07/2026).
    Se o modelo pedir `consultar_processo`, consulta o DataJud e repergunta (máx. 2
-   iterações).
+   iterações). Se pedir `consultar_cliente` (CPF ou nome, quando o cliente não tem o
+   CNJ), [crm.js](sistema/crm.js) resolve na API pública do escritório (`clientes.php` +
+   `processos.php`) para o(s) número(s) CNJ do cliente e o andamento vem **sempre do
+   DataJud** — a base do escritório serve só para achar o número, não como fonte do
+   andamento (a rotina de atualização de lá já deu problema).
 7. Se `escalar: true` → escolhe advogado por área ([advogados.js](sistema/advogados.js)),
    responde ao cliente e **avisa o advogado** por WhatsApp com o resumo da triagem — ambas
    as mensagens vêm de templates editáveis ([mensagens.js](sistema/mensagens.js), com
@@ -123,7 +128,11 @@ estratégias; ampliar a janela tem custo desprezível. Por isso a decisão de co
 
 O system prompt exige **um único objeto JSON**, sem cercas de código. Campos:
 `resposta`, `escalar` (bool), `area`, `motivo` (preenchido quando escala),
-`consultar_processo` (nº CNJ ou null), `perfil: { area_interesse, observacoes }`.
+`consultar_processo` (nº CNJ ou null), `consultar_cliente` (CPF ou nome do cliente, ou
+null — quando ele quer o andamento mas não tem o CNJ), `perfil: { area_interesse,
+observacoes }`. `consultar_processo` tem precedência sobre `consultar_cliente` (o modelo
+nunca deve preencher os dois). Nenhum dos dois é persistido no histórico (são só gatilhos
+de ferramenta; salvá-los faria o modelo reexecutar a consulta a partir do histórico).
 A leitura é tolerante (`extrairDados` em [bot.js:24](sistema/bot.js#L24)): tenta JSON puro,
 remove ```` ``` ````, extrai o primeiro `{...}`. **Não use `response_format: json_object`**
 — nos testes a DeepSeek ficou instável nesse modo; usamos texto normal.
@@ -139,6 +148,16 @@ remove ```` ``` ````, extrai o primeiro `{...}`. **Não use `response_format: js
 - `HISTORICO_LIMIT` (30) — tamanho da janela de histórico.
 - `DEBOUNCE_MS` (5000), `MIDIA_COOLDOWN_MS` (60000), `DATAJUD_API_URL`,
   `PAINEL_PORTA` (3000).
+- `CRM_API_URL` (padrão `https://ferreiraramos.adv.br/api`) — base da API do escritório
+  usada por [crm.js](sistema/crm.js) para resolver CPF/nome → CNJ; `CRM_CACHE_MS` (60000)
+  = TTL do cache em memória das listas de clientes/processos.
+- ⚠️ **PENDENTE — token da API do escritório**: hoje `clientes.php`/`processos.php` estão
+  **abertos só por causa desta automação** e vão **voltar a exigir token** (o Marcelo
+  confirma o formato depois). Quando isso ocorrer: definir `CRM_API_TOKEN` no `.env` e
+  ligar o envio do cabeçalho no ponto marcado `TODO(token)` em [crm.js](sistema/crm.js)
+  (`getJson`). Sem o token, o servidor responde 401/403 e a busca por CPF/nome deixa de
+  funcionar (o bot degrada pedindo o CNJ). O **DataJud** (`datajud_autocomplete.php`) é
+  **API pública** e **não** usa token — não mexer no [datajud.js](sistema/datajud.js).
 
 ## Painel web ([painel.js](sistema/painel.js), porta 3000)
 

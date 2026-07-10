@@ -9,6 +9,7 @@ const { readMarkdown, criarMdCliente, atualizarMdCliente } = require('./context'
 const { buildSystemPrompt } = require('./prompt');
 const { escolherAdvogado, getAreasDisponiveis } = require('./advogados');
 const { consultarProcesso } = require('./datajud');
+const { buscarProcessosPorCliente } = require('./crm');
 const { numeroPermitido } = require('./whitelist');
 const { renderMensagemCliente, renderMensagemAdvogado } = require('./mensagens');
 const midia = require('./midia');
@@ -86,6 +87,68 @@ function formatarResultadoProcesso(r) {
     `- Ultima movimentacao: ${r.ultima_movimentacao || 'N/D'}`,
     `- Data da ultima movimentacao: ${r.data_ultima_movimentacao || 'N/D'}`,
   ].join('\n');
+}
+
+// Quantos processos do mesmo cliente consultamos no DataJud por vez (evita
+// disparar dezenas de chamadas quando o cliente tem muitos processos).
+const MAX_PROCESSOS_CLIENTE = 5;
+
+/**
+ * Resolve um CPF/nome (via API do escritorio, ver crm.js) para o(s) processo(s)
+ * do cliente e, para cada um, busca o andamento no DataJud (fonte autoritativa —
+ * NAO confiamos no andamento que a base do escritorio traz). Devolve um texto
+ * para o modelo resumir ao cliente. E async porque consulta o DataJud.
+ */
+async function formatarResultadoCliente(r) {
+  if (!r || r.erro) {
+    return 'Nao foi possivel localizar o cliente agora (instabilidade no servico de consulta). ' +
+      'Informe o cliente e sugira tentar novamente em instantes, ou pedir pelo numero do processo (CNJ).';
+  }
+  if (!r.encontrado) {
+    if (r.motivo === 'nome_ambiguo') {
+      return 'Ha mais de um cliente com esse nome nos registros. NAO cite nomes de terceiros. ' +
+        'Peca gentilmente o CPF ou o numero do processo (CNJ) para identificar com seguranca.';
+    }
+    if (r.motivo === 'cpf_nao_encontrado' || r.motivo === 'nome_nao_encontrado') {
+      return 'Nao encontrei esse cliente nos registros do escritorio. Peca para conferir os dados ' +
+        '(nome completo ou CPF) ou, se tiver, o numero do processo (CNJ).';
+    }
+    return 'Nao foi possivel identificar o cliente. Peca gentilmente o numero do processo (CNJ).';
+  }
+  if (!r.processos || r.processos.length === 0) {
+    return `Cliente ${r.cliente.nome} localizado, mas sem processo cadastrado no escritorio. ` +
+      'Informe com gentileza e ofereca ajuda ou encaminhamento se ele precisar.';
+  }
+
+  // Sempre busca o andamento no DataJud para cada processo (em paralelo).
+  const lista = r.processos.slice(0, MAX_PROCESSOS_CLIENTE);
+  const andamentos = await Promise.all(lista.map((p) => consultarProcesso(p.num_processo)));
+
+  const partes = [
+    `Cliente ${r.cliente.nome} — ${r.processos.length} processo(s) localizado(s). ` +
+      'Resuma para o cliente em linguagem simples e curta a situacao atual de cada um ' +
+      '(ultima movimentacao e sua data). Use somente os dados abaixo; nao invente:',
+  ];
+  lista.forEach((p, i) => {
+    const d = andamentos[i];
+    if (d && d.encontrado) {
+      partes.push(
+        `\nProcesso ${p.num_processo}:` +
+        `\n- Tipo: ${d.tipo || p.classificacao_nome || 'N/D'}` +
+        `\n- Tribunal: ${d.tribunal || 'N/D'} (grau ${d.grau || 'N/D'})` +
+        `\n- Orgao julgador: ${d.orgao_julgador || 'N/D'}` +
+        `\n- Ultima movimentacao: ${d.ultima_movimentacao || 'N/D'}` +
+        `\n- Data da ultima movimentacao: ${d.data_ultima_movimentacao || 'N/D'}`,
+      );
+    } else {
+      partes.push(`\nProcesso ${p.num_processo}: nao foi possivel obter o andamento no DataJud agora.`);
+    }
+  });
+  if (r.processos.length > lista.length) {
+    partes.push(`\n(Ha mais ${r.processos.length - lista.length} processo(s) desse cliente; ` +
+      'peca para ele especificar qual deseja acompanhar, se precisar.)');
+  }
+  return partes.join('\n');
 }
 
 // Modelo da DeepSeek. Configuravel pelo .env (DEEPSEEK_MODEL).
@@ -455,19 +518,33 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
         dados = { resposta: content, escalar: false, area: 'geral', motivo: '' };
       }
 
-      // Se o modelo pediu para consultar um processo, busca os dados e volta a
-      // perguntar (agora com as informacoes do DataJud em maos).
-      if (dados.consultar_processo && consultas < 2) {
+      // Se o modelo pediu uma consulta — por numero (consultar_processo) ou por
+      // CPF/nome do cliente (consultar_cliente) — executamos e voltamos a
+      // perguntar (agora com os dados em maos). Precedencia: se o modelo mandar
+      // um numero CNJ, usamos ele direto; senao, resolvemos pelo cliente.
+      if ((dados.consultar_processo || dados.consultar_cliente) && consultas < 2) {
         consultas++;
-        const numeroProc = String(dados.consultar_processo).trim();
-        console.log(`Consultando DataJud: ${numeroProc}`);
-        const dadosProcesso = await consultarProcesso(numeroProc);
+        let resultadoTexto;
+
+        if (dados.consultar_processo) {
+          const numeroProc = String(dados.consultar_processo).trim();
+          console.log(`Consultando DataJud: ${numeroProc}`);
+          const dadosProcesso = await consultarProcesso(numeroProc);
+          resultadoTexto = formatarResultadoProcesso(dadosProcesso);
+        } else {
+          // consultar_cliente pode vir como string (CPF ou nome) ou objeto.
+          const alvo = typeof dados.consultar_cliente === 'string'
+            ? dados.consultar_cliente
+            : (dados.consultar_cliente.cpf || dados.consultar_cliente.nome || '');
+          console.log(`Localizando processo por cliente: ${alvo}`);
+          const dadosCliente = await buscarProcessosPorCliente(alvo);
+          resultadoTexto = await formatarResultadoCliente(dadosCliente);
+        }
 
         messages.push({ role: 'assistant', content });
         messages.push({
           role: 'user',
-          content: '[Resultado da consulta ao DataJud — use para responder ao cliente]\n' +
-            formatarResultadoProcesso(dadosProcesso),
+          content: '[Resultado da consulta — use para responder ao cliente]\n' + resultadoTexto,
         });
         continue; // pede a resposta final
       }
