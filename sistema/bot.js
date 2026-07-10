@@ -11,6 +11,14 @@ const { escolherAdvogado, getAreasDisponiveis } = require('./advogados');
 const { consultarProcesso } = require('./datajud');
 const { numeroPermitido } = require('./whitelist');
 const { renderMensagemCliente, renderMensagemAdvogado } = require('./mensagens');
+const avisos = require('./avisos');
+
+// Identifica se um erro da API e de autenticacao (chave invalida/ausente).
+function ehErroDeChave(err) {
+  const status = err && (err.status || err.statusCode);
+  const msg = String((err && err.message) || err || '');
+  return status === 401 || /\b401\b|unauthorized|api key|invalid.*key|authentication/i.test(msg);
+}
 
 // Extrai o primeiro nome (para tratar o cliente pelo nome na mensagem). Se o
 // "nome" for so o numero de telefone, devolve vazio (nao usa numero como nome).
@@ -445,7 +453,14 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
         } catch (notifyErr) {
           // Falha ao avisar o advogado nao deve impedir a resposta ao cliente.
           console.error('Falha ao avisar o advogado:', notifyErr.message);
+          avisos.registrar('aviso', 'Não consegui avisar um advogado sobre um encaminhamento.',
+            `Advogado: ${(advogado && advogado.nome) || numeroHumano}. Confira o número dele na aba "Advogados". O cliente ${nomeDisplay || numero} foi avisado de que será contatado.`);
         }
+      } else {
+        // Nenhum advogado/numero configurado: o cliente foi avisado que sera
+        // contatado, mas nao ha para quem encaminhar.
+        avisos.registrar('erro', 'Um cliente precisa de atendimento humano, mas não há advogado configurado.',
+          `Cliente ${nomeDisplay || numero} (área: ${dados.area || 'geral'}). Cadastre um advogado na aba "Advogados" para receber os encaminhamentos.`);
       }
 
       // 9b-2) Pausa o atendimento automatico: a partir da PROXIMA mensagem o bot
@@ -506,8 +521,16 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
       console.error('Falha ao atualizar o .md do cliente:', e.message);
     }
   } catch (err) {
-    // Qualquer erro (API, banco, etc.) cai aqui: loga e avisa o cliente.
+    // Qualquer erro (API, banco, etc.) cai aqui: loga, avisa o usuario no
+    // painel (em portugues simples) e responde o cliente com a msg de instabilidade.
     console.error('Erro ao processar mensagem:', err);
+    if (ehErroDeChave(err)) {
+      avisos.registrar('erro', 'A chave da API parece inválida ou ausente.',
+        'O bot não consegue gerar respostas. Confira e salve a chave na aba "Chave da API".');
+    } else {
+      avisos.registrar('erro', 'Não consegui responder um cliente.',
+        `Cliente ${nomeDisplay || numero}. Pode ser instabilidade do serviço de IA ou falta de internet. O cliente recebeu um aviso pedindo para tentar novamente em instantes.`);
+    }
     try {
       await message.reply(MSG_INSTABILIDADE);
     } catch (replyErr) {

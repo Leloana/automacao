@@ -6,13 +6,14 @@
 
 const http = require('http');
 const qrcode = require('qrcode');
-const { lerConfig, salvarConfig, soDigitos } = require('./whitelist');
+const { lerConfig, salvarConfig, soDigitos, variantes } = require('./whitelist');
 const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require('./prompt');
 const { getMensagens, salvarMensagens, MSG_CLIENTE_PADRAO, MSG_ADVOGADO_PADRAO } = require('./mensagens');
 const { getAdvogados, salvarAdvogados } = require('./advogados');
 const { readMarkdown, escreverMarkdown, criarFichaCliente } = require('./context');
 const apikey = require('./apikey');
 const db = require('./db');
+const avisos = require('./avisos');
 
 // Instituicao usada ao cadastrar um cliente pelo painel (mesma logica do bot).
 const INSTITUICAO_PADRAO_ID = Number(process.env.INSTITUICAO_PADRAO_ID) || 1;
@@ -52,7 +53,7 @@ const HTML = `<!DOCTYPE html>
 <title>Painel do Bot — Ferreira Ramos</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Segoe UI, Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+  body { font-family: Segoe UI, Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 0; }
   .card { max-width: 560px; margin: 0 auto 20px; background: #1e293b; border-radius: 12px; padding: 24px; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
   h1 { font-size: 20px; margin: 0 0 4px; }
   h2 { font-size: 16px; margin: 0 0 14px; }
@@ -99,11 +100,64 @@ const HTML = `<!DOCTYPE html>
   .info:hover, .info:focus { background: #334155; color: #e2e8f0; outline: none; }
   .info .tip { position: absolute; top: 26px; left: 0; z-index: 20; width: 280px; max-width: 78vw; background: #0b1220; color: #cbd5e1; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 400; font-style: normal; line-height: 1.5; letter-spacing: normal; text-align: left; box-shadow: 0 10px 28px rgba(0,0,0,.5); opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity .12s ease, transform .12s ease; pointer-events: none; }
   .info:hover .tip, .info:focus .tip { opacity: 1; visibility: visible; transform: translateY(0); }
+  /* Layout com navegacao lateral: uma secao (card) por vez. */
+  .layout { display: flex; align-items: flex-start; min-height: 100vh; }
+  .sidebar { position: sticky; top: 0; align-self: flex-start; width: 240px; flex: none; height: 100vh; overflow-y: auto; background: #111c31; border-right: 1px solid #1f2b45; padding: 18px 12px; }
+  .brand { font-size: 15px; font-weight: 700; line-height: 1.3; padding: 6px 12px 16px; }
+  .brand small { display: block; color: #94a3b8; font-weight: 400; font-size: 12px; margin-top: 2px; }
+  .nav-btn { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; color: #cbd5e1; padding: 11px 12px; border-radius: 8px; font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .nav-btn:hover { background: #1b2740; }
+  .nav-btn.active { background: #1d4ed8; color: #fff; }
+  .nav-btn .ic { font-size: 16px; width: 20px; text-align: center; flex: none; }
+  .nav-btn .lbl { flex: 1; }
+  .nav-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: #64748b; }
+  .nav-badge { background: #ef4444; color: #fff; font-size: 11px; font-weight: 700; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .aviso-erro { border-left: 3px solid #ef4444; }
+  .aviso-aviso { border-left: 3px solid #f59e0b; }
+  .content { flex: 1; min-width: 0; padding: 24px; }
+  .card.hidden { display: none; }
+  @media (max-width: 760px) {
+    .layout { flex-direction: column; }
+    .sidebar { width: 100%; height: auto; position: static; display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding: 10px; border-right: none; border-bottom: 1px solid #1f2b45; }
+    .brand { display: none; }
+    .nav-btn { width: auto; white-space: nowrap; margin-bottom: 0; }
+    .content { padding: 16px; }
+  }
 </style>
 </head>
 <body>
+  <div class="layout">
+    <nav class="sidebar">
+      <div class="brand">Painel do Bot<small>Ferreira Ramos</small></div>
+      <button class="nav-btn" data-target="sec-conexao"><span class="ic">📱</span><span class="lbl">Conexão</span><span class="nav-dot" id="nav-dot"></span></button>
+      <button class="nav-btn" data-target="sec-avisos"><span class="ic">🔔</span><span class="lbl">Avisos</span><span class="nav-badge" id="nav-badge-avisos" style="display:none">0</span></button>
+      <button class="nav-btn" data-target="sec-apikey"><span class="ic">🔑</span><span class="lbl">Chave da API</span></button>
+      <button class="nav-btn" data-target="sec-clientes"><span class="ic">➕</span><span class="lbl">Criar cliente</span></button>
+      <button class="nav-btn" data-target="sec-contexto"><span class="ic">👥</span><span class="lbl">Clientes</span></button>
+      <button class="nav-btn" data-target="sec-atendimento"><span class="ic">⏯️</span><span class="lbl">Atendimento (pausar)</span></button>
+      <button class="nav-btn" data-target="sec-personalidade"><span class="ic">🎭</span><span class="lbl">Personalidade</span></button>
+      <button class="nav-btn" data-target="sec-mensagens"><span class="ic">✉️</span><span class="lbl">Mensagens de encaminhamento</span></button>
+      <button class="nav-btn" data-target="sec-advogados"><span class="ic">⚖️</span><span class="lbl">Advogados</span></button>
+    </nav>
+    <main class="content">
+  <!-- Avisos e problemas (erros amigaveis) -->
+  <div class="card hidden" id="sec-avisos">
+    <h2>Avisos e problemas<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Problemas recentes que podem precisar da sua atenção, explicados em linguagem simples (sem precisar olhar o terminal). Se estiver vazio, está tudo funcionando.</span></span></h2>
+    <p class="sub">O que deu errado recentemente e o que fazer. Se estiver vazio, está tudo certo.</p>
+
+    <div class="add" style="justify-content:flex-end">
+      <button class="btn-add" onclick="carregarAvisos()" title="Atualizar">↻ Atualizar</button>
+    </div>
+
+    <div id="avisos"></div>
+    <div id="avisos-vazio" class="vazio" style="display:none">Nenhum problema recente. Tudo certo! ✅</div>
+
+    <button class="btn-reset" onclick="limparAvisos()">Limpar avisos</button>
+    <div class="status" id="status-avisos"></div>
+  </div>
+
   <!-- Chave da API (DeepSeek) -->
-  <div class="card">
+  <div class="card hidden" id="sec-apikey">
     <h2>Chave da API (DeepSeek)<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">A chave de acesso ao serviço de inteligência artificial (DeepSeek) que gera as respostas do bot. Sem ela, o bot conecta ao WhatsApp mas não consegue responder. A chave fica guardada só neste computador.</span></span></h2>
     <p class="sub">Sem esta chave o bot conecta ao WhatsApp, mas <b>não consegue responder</b>. Cole a chave fornecida pelo escritório e clique em Salvar.</p>
     <div id="apikey-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="apikey-estado-txt">Verificando...</span></div>
@@ -117,7 +171,7 @@ const HTML = `<!DOCTYPE html>
   </div>
 
   <!-- Conexao do WhatsApp -->
-  <div class="card">
+  <div class="card" id="sec-conexao">
     <h1>Conexão do WhatsApp<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Mostra se o bot está conectado ao WhatsApp do escritório. Se aparecer um QR code, escaneie com o celular para conectar. Use "Trocar de WhatsApp" para conectar outro número.</span></span></h1>
     <p class="sub">Status da conexão do bot com o WhatsApp do escritório.</p>
     <div id="banner" class="banner b-carregando"><span class="dot"></span><span id="banner-txt">Carregando...</span></div>
@@ -131,9 +185,9 @@ const HTML = `<!DOCTYPE html>
   </div>
 
   <!-- Whitelist / cadastro de clientes -->
-  <div class="card">
-    <h2>Clientes autorizados<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">A lista de números que o bot atende — ele responde apenas quem está aqui. Ao adicionar um cliente, você já preenche a ficha dele, para o bot saber com quem está falando desde a primeira mensagem.</span></span></h2>
-    <p class="sub">O bot responde <b>apenas</b> os números desta lista. Ao adicionar um cliente, você já cria a ficha dele — assim o bot sabe com quem está falando desde a primeira mensagem.</p>
+  <div class="card hidden" id="sec-clientes">
+    <h2>Criar cliente<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">A lista de números que o bot atende — ele responde apenas quem está aqui. Ao adicionar um cliente, você já preenche a ficha dele, para o bot saber com quem está falando desde a primeira mensagem.</span></span></h2>
+    <p class="sub">Autoriza o número (o bot só responde quem foi cadastrado) e já cria a ficha do cliente — assim o bot sabe com quem está falando desde a primeira mensagem.</p>
 
     <div class="adv">
       <div class="row">
@@ -145,16 +199,12 @@ const HTML = `<!DOCTYPE html>
       <div class="adv-foot"><button class="btn-add" onclick="adicionar()">+ Adicionar cliente</button></div>
     </div>
 
-    <ul id="lista"></ul>
-    <div id="vazio" class="vazio" style="display:none">Nenhum número na lista.</div>
-
-    <button class="btn-save" onclick="salvar()">Salvar alterações</button>
     <div class="status" id="status"></div>
-    <p class="sub" style="margin-top:16px">Número: país + DDD + número, só dígitos (ex: <code>5514998689481</code>). O que você escrever aqui vai para as anotações do escritório na ficha e <b>nunca é alterado pelo bot</b>. Para remover alguém, use "Remover" e clique em "Salvar alterações".</p>
+    <p class="sub" style="margin-top:16px">Número: país + DDD + número, só dígitos (ex: <code>5514998689481</code>). O que você escrever aqui vai para as anotações do escritório na ficha e <b>nunca é alterado pelo bot</b>. Os clientes cadastrados aparecem nas abas <b>Clientes</b> e <b>Atendimento</b>.</p>
   </div>
 
   <!-- Personalidade do bot -->
-  <div class="card">
+  <div class="card hidden" id="sec-personalidade">
     <h2>Personalidade do bot<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Define o tom, o estilo e o jeito de falar do bot com os clientes. Edite para deixar as respostas mais formais, mais calorosas, etc. As mudanças valem na hora, sem reiniciar.</span></span></h2>
     <p class="sub">Tom, estilo e papel do assistente. Use <code>{nomeInstituicao}</code> para inserir o nome do escritório. As alterações valem na hora, sem reiniciar.</p>
     <textarea id="personalidade" rows="14" placeholder="Descreva como o bot deve se comportar..."></textarea>
@@ -164,7 +214,7 @@ const HTML = `<!DOCTYPE html>
   </div>
 
   <!-- Mensagens de encaminhamento -->
-  <div class="card">
+  <div class="card hidden" id="sec-mensagens">
     <h2>Mensagens de encaminhamento<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Os textos enviados quando o bot passa o atendimento para um advogado: a mensagem ao cliente e o alerta ao advogado. Use os campos entre chaves (ex.: {nome}) para inserir dados automaticamente.</span></span></h2>
     <p class="sub">Textos enviados quando o bot encaminha o atendimento a um advogado. As alterações valem na hora, sem reiniciar.</p>
 
@@ -182,21 +232,33 @@ const HTML = `<!DOCTYPE html>
   </div>
 
   <!-- Advogados de redirecionamento -->
-  <div class="card">
+  <div class="card hidden" id="sec-advogados">
     <h2>Advogados de redirecionamento<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Quem recebe os atendimentos encaminhados, por área do direito. Quando o bot escala um caso, escolhe o advogado pela área; sem área correspondente, usa o marcado como padrão.</span></span></h2>
     <p class="sub">Quando o bot escala um atendimento, escolhe o advogado pela <b>área</b>. Sem área correspondente, usa o marcado como <b>padrão</b>. As alterações valem na hora.</p>
+
+    <div class="adv">
+      <div class="row">
+        <div class="field"><label>Nome</label><input type="text" id="adv-nome" placeholder="Ex: Dra. Maria" /></div>
+        <div class="field"><label>Número (WhatsApp)</label><input type="text" id="adv-numero" placeholder="5514998689481" /></div>
+      </div>
+      <div class="field"><label>Áreas (separadas por vírgula)</label><input type="text" id="adv-areas" placeholder="trabalhista, familia" /></div>
+      <div class="checks">
+        <label><input type="checkbox" id="adv-padrao" /> Padrão</label>
+        <label><input type="checkbox" id="adv-ativo" checked /> Ativo</label>
+      </div>
+      <div class="adv-foot"><button class="btn-add" onclick="adicionarAdv()">+ Adicionar advogado</button></div>
+    </div>
 
     <div id="advs"></div>
     <div id="advs-vazio" class="vazio" style="display:none">Nenhum advogado cadastrado.</div>
 
-    <button class="btn-add" onclick="adicionarAdv()" style="width:100%;padding:12px;margin-top:4px">+ Adicionar advogado</button>
     <button class="btn-save" onclick="salvarAdvs()">Salvar advogados</button>
     <div class="status" id="status-adv"></div>
-    <p class="sub" style="margin-top:16px">Número no formato país + DDD + número, só dígitos. Áreas separadas por vírgula (ex: <code>trabalhista, familia</code>).</p>
+    <p class="sub" style="margin-top:16px">Número no formato país + DDD + número, só dígitos. Áreas separadas por vírgula (ex: <code>trabalhista, familia</code>). Você pode editar os advogados já cadastrados na lista abaixo e clicar em "Salvar advogados".</p>
   </div>
 
   <!-- Atendimento por cliente (pausar/reativar o bot) -->
-  <div class="card">
+  <div class="card hidden" id="sec-atendimento">
     <h2>Atendimento por cliente<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Liga ou desliga o bot para cada cliente. Ao encaminhar para um advogado, o bot pausa sozinho e uma pessoa assume a conversa pelo WhatsApp; reative quando quiser que o bot volte a atender.</span></span></h2>
     <p class="sub">Ligue ou desligue o bot para cada cliente. Ao encaminhar para um advogado, o bot <b>pausa sozinho</b> — reative quando quiser que ele volte a atender. Enquanto pausado, uma pessoa responde pelo WhatsApp e o bot fica em silêncio.</p>
 
@@ -210,8 +272,8 @@ const HTML = `<!DOCTYPE html>
   </div>
 
   <!-- Contexto dos clientes -->
-  <div class="card">
-    <h2>Contexto dos clientes<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">O que o bot sabe sobre cada cliente (assunto, histórico do caso). Edite para corrigir algo que a IA tenha entendido errado — o bot usa este texto como contexto nas próximas mensagens.</span></span></h2>
+  <div class="card hidden" id="sec-contexto">
+    <h2>Clientes<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">O que o bot sabe sobre cada cliente (assunto, histórico do caso). Edite para corrigir algo que a IA tenha entendido errado — o bot usa este texto como contexto nas próximas mensagens.</span></span></h2>
     <p class="sub">O que o bot sabe sobre cada cliente. Edite para corrigir algo que a IA tenha entendido errado. O bot usa este texto como contexto nas próximas mensagens.</p>
 
     <div class="add">
@@ -221,12 +283,14 @@ const HTML = `<!DOCTYPE html>
 
     <textarea id="cliente-md" rows="14" placeholder="Selecione um cliente para ver e editar o contexto..."></textarea>
     <button class="btn-save" onclick="salvarCliente()">Salvar contexto</button>
+    <button class="btn-reset" onclick="removerAutorizacao()">Remover autorização deste cliente</button>
     <div class="status" id="status-cli"></div>
-    <p class="sub" style="margin-top:16px">Dica: o que estiver abaixo de <code>## Anotações do escritório</code> nunca é alterado pelo bot — bom lugar para suas notas.</p>
+    <p class="sub" style="margin-top:16px">Dica: o que estiver abaixo de <code>## Anotações do escritório</code> nunca é alterado pelo bot — bom lugar para suas notas. "Remover autorização" faz o bot parar de responder este número (o histórico é mantido).</p>
+  </div>
+    </main>
   </div>
 
 <script>
-  let numeros = [];
   function soDigitos(s){ return String(s||'').replace(/\\D/g,''); }
 
   // ---- Status da conexao (atualiza sozinho) ----
@@ -245,6 +309,12 @@ const HTML = `<!DOCTYPE html>
       const banner = document.getElementById('banner');
       banner.className = 'banner ' + info.cls;
       document.getElementById('banner-txt').textContent = info.txt;
+      // Reflete o status no "dot" do botao Conexão da barra lateral.
+      const dot = document.getElementById('nav-dot');
+      if (dot) {
+        const cores = { conectado: '#22c55e', qr: '#f59e0b', carregando: '#64748b', desconectado: '#ef4444', falha: '#ef4444' };
+        dot.style.background = cores[s.status] || '#64748b';
+      }
       const qrbox = document.getElementById('qrbox');
       if (s.status === 'qr' && s.qr) {
         document.getElementById('qrimg').src = s.qr;
@@ -255,20 +325,10 @@ const HTML = `<!DOCTYPE html>
     } catch (e) { /* ignora; tenta de novo no proximo ciclo */ }
   }
 
-  // ---- Whitelist ----
-  function render(){
-    const ul = document.getElementById('lista');
-    ul.innerHTML = '';
-    document.getElementById('vazio').style.display = numeros.length ? 'none' : 'block';
-    numeros.forEach((n, i) => {
-      const li = document.createElement('li');
-      li.innerHTML = '<span>' + n + '</span>';
-      const b = document.createElement('button');
-      b.className = 'btn-rem'; b.textContent = 'Remover';
-      b.onclick = () => { numeros.splice(i,1); render(); };
-      li.appendChild(b);
-      ul.appendChild(li);
-    });
+  // ---- Criar cliente ----
+  function setStatus(msg, ok){
+    const s = document.getElementById('status');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
   }
   async function adicionar(){
     const inp = document.getElementById('novo');
@@ -276,41 +336,20 @@ const HTML = `<!DOCTYPE html>
     const n = soDigitos(inp.value);
     if (n.length < 12 || n.length > 13) { setStatus('Número inválido. Use país+DDD+número (12 ou 13 dígitos).', false); return; }
     if (!nome) { setStatus('Informe o nome do cliente.', false); return; }
-    if (numeros.includes(n)) { setStatus('Esse número já está na lista.', false); return; }
     const area = document.getElementById('novo-area').value.trim();
     const observacoes = document.getElementById('novo-obs').value.trim();
     try {
       const r = await fetch('/api/whitelist/cliente', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ numero: n, nome, area, observacoes }) });
       const cfg = await r.json();
       if (cfg.erro) return setStatus('Erro: ' + cfg.erro, false);
-      numeros = cfg.numeros || [];
-      render();
       inp.value = '';
       document.getElementById('novo-nome').value = '';
       document.getElementById('novo-area').value = '';
       document.getElementById('novo-obs').value = '';
-      setStatus('Cliente adicionado! Ficha criada e já vale (sem reiniciar).', true);
+      setStatus('Cliente adicionado! Ficha criada e já vale (sem reiniciar). Veja nas abas Clientes e Atendimento.', true);
       carregarClientes();
+      carregarAtendimentos();
     } catch (e) { setStatus('Erro ao adicionar: ' + e.message, false); }
-  }
-  function setStatus(msg, ok){
-    const s = document.getElementById('status');
-    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
-  }
-  async function carregarWhitelist(){
-    const r = await fetch('/api/whitelist');
-    const cfg = await r.json();
-    numeros = cfg.numeros || [];
-    render();
-  }
-  async function salvar(){
-    try {
-      const r = await fetch('/api/whitelist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ numeros }) });
-      const cfg = await r.json();
-      numeros = cfg.numeros || [];
-      render();
-      setStatus('Salvo! As alterações já valem (sem reiniciar o bot).', true);
-    } catch (e) { setStatus('Erro ao salvar: ' + e.message, false); }
   }
 
   document.getElementById('novo').addEventListener('keydown', (e) => { if (e.key === 'Enter') adicionar(); });
@@ -414,8 +453,23 @@ const HTML = `<!DOCTYPE html>
   }
   function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function adicionarAdv(){
-    advogados.push({ nome: '', numero: '', areas: [], padrao: false, ativo: true });
+    const nome = document.getElementById('adv-nome').value.trim();
+    const numero = soDigitos(document.getElementById('adv-numero').value);
+    if (!nome) return setStatusAdv('Informe o nome do advogado.', false);
+    if (numero.length < 12 || numero.length > 13) return setStatusAdv('Número inválido. Use país+DDD+número (12 ou 13 dígitos).', false);
+    const areas = document.getElementById('adv-areas').value.split(',').map((s) => s.trim()).filter(Boolean);
+    const padrao = document.getElementById('adv-padrao').checked;
+    const ativo = document.getElementById('adv-ativo').checked;
+    if (padrao) advogados.forEach((a) => { a.padrao = false; }); // "padrão" é exclusivo
+    advogados.push({ nome, numero, areas, padrao, ativo });
+    // Limpa o formulário de criar.
+    document.getElementById('adv-nome').value = '';
+    document.getElementById('adv-numero').value = '';
+    document.getElementById('adv-areas').value = '';
+    document.getElementById('adv-padrao').checked = false;
+    document.getElementById('adv-ativo').checked = true;
     renderAdvs();
+    setStatusAdv('Advogado adicionado à lista. Clique em "Salvar advogados" para aplicar.', true);
   }
   async function carregarAdvs(){
     try {
@@ -480,6 +534,18 @@ const HTML = `<!DOCTYPE html>
       if (d.erro) return setStatusCli('Erro: ' + d.erro, false);
       setStatusCli('Contexto salvo! Já vale para as próximas mensagens.', true);
     } catch (e) { setStatusCli('Erro ao salvar: ' + e.message, false); }
+  }
+  async function removerAutorizacao(){
+    if (!clienteAtual) return setStatusCli('Selecione um cliente primeiro.', false);
+    if (!confirm('Remover a autorização deste cliente? O bot vai parar de responder este número. O histórico e o contexto são mantidos.')) return;
+    try {
+      const r = await fetch('/api/whitelist/remover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: clienteAtual }) });
+      const d = await r.json();
+      if (d.erro) return setStatusCli('Erro: ' + d.erro, false);
+      setStatusCli('Autorização removida. O bot não responde mais este número.', true);
+      carregarClientes();
+      carregarAtendimentos();
+    } catch (e) { setStatusCli('Erro ao remover: ' + e.message, false); }
   }
 
   // ---- Chave da API (DeepSeek) ----
@@ -610,15 +676,69 @@ const HTML = `<!DOCTYPE html>
     } catch (e) { setStatusAtend('Erro ao alterar: ' + e.message, false); }
   }
 
+  // ---- Avisos e problemas (erros amigaveis) ----
+  function setStatusAvisos(msg, ok){
+    const s = document.getElementById('status-avisos');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  async function carregarAvisos(){
+    try {
+      const r = await fetch('/api/avisos');
+      const d = await r.json();
+      renderAvisos(d.avisos || []);
+    } catch (e) { /* silencioso: nao poluir a tela por causa do proprio painel */ }
+  }
+  function renderAvisos(av){
+    const box = document.getElementById('avisos');
+    box.innerHTML = '';
+    document.getElementById('avisos-vazio').style.display = av.length ? 'none' : 'block';
+    const badge = document.getElementById('nav-badge-avisos');
+    if (av.length) { badge.textContent = av.length > 9 ? '9+' : String(av.length); badge.style.display = 'inline-flex'; }
+    else { badge.style.display = 'none'; }
+    av.forEach((a) => {
+      const div = document.createElement('div');
+      div.className = 'adv aviso-' + (a.nivel === 'erro' ? 'erro' : 'aviso');
+      const rep = a.repeticoes && a.repeticoes > 1 ? ' (x' + a.repeticoes + ')' : '';
+      div.innerHTML =
+        '<div style="display:flex;gap:8px;align-items:baseline">' +
+          '<span style="flex:none">' + (a.nivel === 'erro' ? '⛔' : '⚠️') + '</span>' +
+          '<div style="flex:1">' +
+            '<div style="font-weight:600">' + esc(a.titulo) + rep + '</div>' +
+            (a.detalhe ? '<div class="sub" style="margin:2px 0 0">' + esc(a.detalhe) + '</div>' : '') +
+            '<div class="sub" style="margin:4px 0 0;font-size:12px">' + esc(a.hora) + '</div>' +
+          '</div>' +
+        '</div>';
+      box.appendChild(div);
+    });
+  }
+  async function limparAvisos(){
+    try {
+      await fetch('/api/avisos/limpar', { method: 'POST' });
+      carregarAvisos();
+      setStatusAvisos('Avisos limpos.', true);
+    } catch (e) { setStatusAvisos('Erro ao limpar: ' + e.message, false); }
+  }
+
+  // ---- Navegacao lateral: mostra uma secao (card) por vez ----
+  function mostrarSecao(id){
+    document.querySelectorAll('.content > .card').forEach((s) => s.classList.toggle('hidden', s.id !== id));
+    document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.getAttribute('data-target') === id));
+  }
+  document.querySelectorAll('.nav-btn').forEach((b) => {
+    b.addEventListener('click', () => mostrarSecao(b.getAttribute('data-target')));
+  });
+  mostrarSecao('sec-conexao'); // secao inicial
+
   carregarApiKey();
-  carregarWhitelist();
   carregarPersonalidade();
   carregarMensagens();
   carregarAdvs();
   carregarClientes();
   carregarAtendimentos();
+  carregarAvisos();
   atualizarStatus();
   setInterval(atualizarStatus, 2500); // verifica a conexao a cada 2,5s
+  setInterval(carregarAvisos, 5000); // atualiza o contador de avisos
 </script>
 </body>
 </html>`;
@@ -711,6 +831,19 @@ function iniciarPainel(porta = 3000) {
       });
     }
 
+    // Remover a autorizacao (whitelist) de um cliente pelo id. O cadastro e o
+    // historico sao mantidos; o bot apenas para de responder esse numero.
+    if (req.method === 'POST' && req.url === '/api/whitelist/remover') {
+      return lerCorpo(req, res, (corpo) => {
+        const c = db.getCliente(Number(corpo.id));
+        if (!c) throw new Error('Cliente não encontrado.');
+        const vars = variantes(soDigitos(c.numero_telefone));
+        const cfg = lerConfig();
+        salvarConfig({ numeros: cfg.numeros.filter((n) => !vars.includes(n)) });
+        return { ok: true };
+      });
+    }
+
     // Ler a personalidade do bot (texto atual + valor padrao de fabrica).
     if (req.method === 'GET' && req.url === '/api/personalidade') {
       return enviarJson(res, 200, { texto: getPersonalidade(), padrao: PERSONALIDADE_PADRAO });
@@ -775,6 +908,17 @@ function iniciarPainel(porta = 3000) {
         escreverMarkdown(c.arquivo_md, corpo.conteudo || '');
         return { ok: true };
       });
+    }
+
+    // Lista de avisos/problemas amigaveis para o usuario.
+    if (req.method === 'GET' && req.url === '/api/avisos') {
+      return enviarJson(res, 200, { avisos: avisos.listar() });
+    }
+
+    // Limpa os avisos.
+    if (req.method === 'POST' && req.url === '/api/avisos/limpar') {
+      avisos.limpar();
+      return enviarJson(res, 200, { ok: true });
     }
 
     // Pausar/reativar o atendimento automatico de um cliente.

@@ -254,9 +254,12 @@ echo - Para parar o bot, feche esta janela.
 echo ============================================
 echo.
 
-rem Abre o painel no navegador apos alguns segundos (tempo do servidor subir).
-rem Roda numa janela minimizada e separada, para nao travar o bot.
-start "" /min cmd /c "timeout /t 5 /nobreak >nul & explorer http://localhost:3000"
+rem Abre o painel no navegador SO quando ele estiver realmente no ar. Antes
+rem abriamos apos 5s fixos: em PCs lentos o servidor ainda nao tinha subido e a
+rem pagina abria com erro (precisava apertar F5). Agora um processo em segundo
+rem plano testa a porta e so abre quando ela responde (espera ate ~90s).
+rem Roda minimizado e separado, para nao travar o bot.
+start "" /min powershell -NoProfile -WindowStyle Hidden -Command "$u='http://localhost:3000'; for($i=0;$i -lt 45;$i++){ try { [void](Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 $u); break } catch { Start-Sleep -Seconds 2 } }; Start-Process $u"
 
 rem ============================================================
 rem 5) Inicia o bot.

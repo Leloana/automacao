@@ -14,6 +14,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const db = require('./db');
 const { handleMessage } = require('./bot');
 const painel = require('./painel');
+const avisos = require('./avisos');
 
 // Garante que as pastas necessarias existam.
 const SESSIONS_DIR = path.join(__dirname, 'data', 'sessions');
@@ -27,6 +28,8 @@ db.initDb();
 // Aviso util se a chave da API nao estiver configurada.
 if (!process.env.DEEPSEEK_API_KEY) {
   console.warn('Aviso: DEEPSEEK_API_KEY nao definida no .env — as respostas vao falhar.');
+  avisos.registrar('aviso', 'A chave da API ainda não foi configurada.',
+    'O bot conecta ao WhatsApp, mas não vai responder até você colar a chave na aba "Chave da API".');
 }
 
 // 2) Sobe o painel web (status da conexao + QR code + whitelist).
@@ -70,11 +73,15 @@ function iniciarClienteWhatsapp() {
   client.on('auth_failure', (msg) => {
     console.error('Falha de autenticacao:', msg);
     painel.setStatus('falha');
+    avisos.registrar('erro', 'Falha ao conectar o WhatsApp.',
+      'Não foi possível autenticar. Vá na aba "Conexão" e escaneie o QR code novamente, ou use "Trocar de WhatsApp".');
   });
 
   client.on('disconnected', (reason) => {
     console.warn('Cliente desconectado:', reason);
     painel.setStatus('desconectado');
+    avisos.registrar('erro', 'O WhatsApp foi desconectado.',
+      `O bot parou de atender. Abra a aba "Conexão" para reconectar (pode ser preciso escanear o QR code de novo). Motivo técnico: ${reason}.`);
   });
 
   // Escuta todas as mensagens (message_create cobre enviadas e recebidas;
@@ -82,6 +89,8 @@ function iniciarClienteWhatsapp() {
   client.on('message_create', (message) => {
     handleMessage(client, message).catch((err) => {
       console.error('Erro nao tratado no handler:', err);
+      avisos.registrar('erro', 'Não consegui processar uma mensagem recebida.',
+        'Ocorreu um erro inesperado ao atender um cliente. Se acontecer com frequência, reinicie o programa.');
     });
   });
 

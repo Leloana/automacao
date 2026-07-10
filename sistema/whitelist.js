@@ -81,4 +81,4 @@ function numeroPermitido(numero) {
   return vars.some((v) => cfg.numeros.includes(v));
 }
 
-module.exports = { numeroPermitido, lerConfig, salvarConfig, soDigitos };
+module.exports = { numeroPermitido, lerConfig, salvarConfig, soDigitos, variantes };

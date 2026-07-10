@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const avisos = require('./avisos');
 
 const LOG_PATH = path.join(__dirname, 'log.txt');
 const BACKUP_PATH = path.join(__dirname, 'log-anterior.txt');
@@ -63,10 +64,18 @@ console.error = (...a) => { original.error(...a); escrever('ERRO', a); };
 process.on('uncaughtException', (err) => {
   escrever('FATAL', ['Excecao nao tratada:', err]);
   original.error(err);
+  try {
+    avisos.registrar('erro', 'Ocorreu um erro inesperado no sistema.',
+      'O bot pode ter ficado instável. Se algo parar de funcionar, feche esta janela e abra o programa novamente.');
+  } catch (_) { /* nunca deixar o registro do aviso derrubar o processo */ }
 });
 process.on('unhandledRejection', (motivo) => {
   escrever('FATAL', ['Promise rejeitada sem tratamento:', motivo]);
   original.error(motivo);
+  try {
+    avisos.registrar('erro', 'Ocorreu um erro inesperado no sistema.',
+      'O bot pode ter ficado instável. Se algo parar de funcionar, feche esta janela e abra o programa novamente.');
+  } catch (_) { /* idem */ }
 });
 
 console.log('===== Log iniciado =====');
