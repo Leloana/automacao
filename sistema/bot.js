@@ -10,6 +10,15 @@ const { buildSystemPrompt } = require('./prompt');
 const { escolherAdvogado, getAreasDisponiveis } = require('./advogados');
 const { consultarProcesso } = require('./datajud');
 const { numeroPermitido } = require('./whitelist');
+const { renderMensagemCliente, renderMensagemAdvogado } = require('./mensagens');
+
+// Extrai o primeiro nome (para tratar o cliente pelo nome na mensagem). Se o
+// "nome" for so o numero de telefone, devolve vazio (nao usa numero como nome).
+function primeiroNome(nome) {
+  const s = String(nome || '').trim();
+  if (!s || /^\d{10,}$/.test(s)) return '';
+  return s.split(/\s+/)[0];
+}
 
 // Aviso educativo. Adicionado apenas na PRIMEIRA mensagem do atendimento
 // (a "saudacao inicial"); nas mensagens seguintes nao se repete.
@@ -189,6 +198,15 @@ async function handleMessage(client, message) {
   // 3) Whitelist: se habilitada, so responde numeros autorizados.
   if (!numeroPermitido(numero)) {
     console.log(`Mensagem ignorada (fora da whitelist): ${numero} (from=${from})`);
+    return;
+  }
+
+  // 3b) Pausa (atendimento humano): se o cliente estiver pausado, o bot fica em
+  // silencio total — nao responde, nao trata midia, nao enfileira nem registra.
+  // Uma pessoa do escritorio assume o atendimento pelo proprio WhatsApp.
+  const clienteAtual = db.getClienteByNumero(numero);
+  if (clienteAtual && clienteAtual.pausado) {
+    console.log(`Cliente pausado (atendimento humano): ${numero} — bot em silencio.`);
     return;
   }
 
@@ -404,27 +422,40 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
       const advogado = escolherAdvogado(dados.area);
       const numeroHumano = advogado ? advogado.numero : instituicao.numero_humano;
 
-      mensagemCliente =
-        'Obrigada por compartilhar tudo isso comigo! 😊 Nossa equipe já foi avisada e está a par do seu caso. ' +
-        'Um de nossos advogados vai entrar em contato com você por aqui em breve para dar continuidade ao atendimento, combinado?';
+      // Mensagem ao cliente (template editavel pelo painel — ver mensagens.js).
+      mensagemCliente = renderMensagemCliente({
+        nome: primeiroNome(nomeDisplay),
+        instituicao: instituicao.nome,
+      });
 
-      // 9b) Avisa o advogado com um resumo do atendimento encaminhado.
+      // 9b) Avisa o advogado com um resumo do atendimento encaminhado (template
+      // editavel pelo painel — ver mensagens.js).
       if (numeroHumano) {
-        const aviso =
-          '🔔 *Novo atendimento encaminhado pelo assistente virtual*\n\n' +
-          `Cliente: ${nomeDisplay}\n` +
-          `Número: ${numero}\n` +
-          `Área: ${dados.area || 'geral'}\n` +
-          `Motivo: ${dados.motivo || 'não informado'}\n\n` +
-          `Última mensagem do cliente:\n"${texto}"\n\n` +
-          'O cliente NÃO recebeu nenhum contato — avisamos que um advogado o chamaria. ' +
-          'Por favor, entre em contato com o cliente para dar continuidade ao atendimento.';
+        const aviso = renderMensagemAdvogado({
+          nome: nomeDisplay,
+          numero,
+          area: dados.area || 'geral',
+          motivo: dados.motivo || 'não informado',
+          ultimaMensagem: texto,
+          nomeAdvogado: (advogado && advogado.nome) || '',
+          instituicao: instituicao.nome,
+        });
         try {
           await client.sendMessage(`${numeroHumano}@c.us`, aviso);
         } catch (notifyErr) {
           // Falha ao avisar o advogado nao deve impedir a resposta ao cliente.
           console.error('Falha ao avisar o advogado:', notifyErr.message);
         }
+      }
+
+      // 9b-2) Pausa o atendimento automatico: a partir da PROXIMA mensagem o bot
+      // fica em silencio para este cliente, deixando o advogado assumir. Falha
+      // aqui nao deve impedir a resposta ao cliente.
+      try {
+        db.setPausado(cliente.id, 1);
+        console.log(`Cliente ${numero} pausado automaticamente apos encaminhamento.`);
+      } catch (pauseErr) {
+        console.error('Falha ao pausar o cliente apos encaminhamento:', pauseErr.message);
       }
     } else {
       // 9c) Atendimento normal. O aviso educativo so entra na primeira

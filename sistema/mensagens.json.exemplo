@@ -1,0 +1,4 @@
+{
+  "cliente": "Obrigada por compartilhar tudo isso comigo! 😊 Nossa equipe já foi avisada e está a par do seu caso. Um de nossos advogados vai entrar em contato com você por aqui em breve para dar continuidade ao atendimento, combinado?",
+  "advogado": "🔔 *Novo atendimento encaminhado pelo assistente virtual*\n\nCliente: {nome}\nNúmero: {numero}\nÁrea: {area}\nMotivo: {motivo}\n\nÚltima mensagem do cliente:\n\"{ultimaMensagem}\"\n\nO cliente NÃO recebeu nenhum contato — avisamos que um advogado o chamaria. Por favor, entre em contato com o cliente para dar continuidade ao atendimento."
+}

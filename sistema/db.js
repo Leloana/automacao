@@ -67,6 +67,14 @@ function initDb() {
     VALUES (1, 'ferreira_ramos', 'Ferreira Ramos Advocacia',
             'instituicoes/exemplo_instituicao.md', '5514998689481', 1)
   `).run();
+
+  // Migracao: CREATE TABLE IF NOT EXISTS nao altera uma tabela ja existente, entao
+  // adicionamos a coluna "pausado" (atendimento humano) so quando ela faltar.
+  // pausado = 1 -> o bot fica em silencio para esse cliente (uma pessoa assume).
+  const colunas = db.prepare("PRAGMA table_info(clientes)").all();
+  if (!colunas.some((c) => c.name === 'pausado')) {
+    db.exec('ALTER TABLE clientes ADD COLUMN pausado INTEGER NOT NULL DEFAULT 0');
+  }
 }
 
 /**
@@ -106,6 +114,23 @@ function setClienteNome(clienteId, nome) {
 }
 
 /**
+ * Busca um cliente pelo numero SEM cria-lo (ao contrario de getOrCreateCliente).
+ * Retorna o registro ou undefined. Usado para checar rapidamente se o cliente
+ * esta pausado antes mesmo de enfileirar a mensagem.
+ */
+function getClienteByNumero(numero) {
+  return db.prepare('SELECT * FROM clientes WHERE numero_telefone = ?').get(numero);
+}
+
+/**
+ * Liga/desliga o atendimento humano (pausa) de um cliente.
+ * pausado = 1 -> o bot nao responde esse cliente; 0 -> bot volta a atender.
+ */
+function setPausado(clienteId, pausado) {
+  db.prepare('UPDATE clientes SET pausado = ? WHERE id = ?').run(pausado ? 1 : 0, clienteId);
+}
+
+/**
  * Retorna a instituicao pelo id (ou undefined se nao existir).
  */
 function getInstituicao(id) {
@@ -118,7 +143,7 @@ function getInstituicao(id) {
  */
 function listClientes() {
   return db.prepare(`
-    SELECT id, numero_telefone, nome_display, arquivo_md
+    SELECT id, numero_telefone, nome_display, arquivo_md, pausado
     FROM clientes
     ORDER BY nome_display COLLATE NOCASE, numero_telefone
   `).all();
@@ -183,6 +208,8 @@ module.exports = {
   getOrCreateCliente,
   setClienteArquivoMd,
   setClienteNome,
+  getClienteByNumero,
+  setPausado,
   getInstituicao,
   listClientes,
   getCliente,

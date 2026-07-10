@@ -27,6 +27,7 @@ clientes/*
 whitelist.json
 advogados.json
 personalidade.txt
+mensagens.json
 
 # Manter as pastas versionadas
 !data/sessions/.gitkeep

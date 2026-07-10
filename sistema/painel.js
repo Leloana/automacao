@@ -8,6 +8,7 @@ const http = require('http');
 const qrcode = require('qrcode');
 const { lerConfig, salvarConfig, soDigitos } = require('./whitelist');
 const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require('./prompt');
+const { getMensagens, salvarMensagens, MSG_CLIENTE_PADRAO, MSG_ADVOGADO_PADRAO } = require('./mensagens');
 const { getAdvogados, salvarAdvogados } = require('./advogados');
 const { readMarkdown, escreverMarkdown, criarFichaCliente } = require('./context');
 const apikey = require('./apikey');
@@ -156,6 +157,24 @@ const HTML = `<!DOCTYPE html>
     <div class="status" id="status-pers"></div>
   </div>
 
+  <!-- Mensagens de encaminhamento -->
+  <div class="card">
+    <h2>Mensagens de encaminhamento</h2>
+    <p class="sub">Textos enviados quando o bot encaminha o atendimento a um advogado. As alterações valem na hora, sem reiniciar.</p>
+
+    <div style="margin-bottom:6px;font-size:13px;color:#94a3b8">Mensagem ao cliente</div>
+    <textarea id="msg-cliente" rows="5" placeholder="Mensagem enviada ao cliente quando o caso é encaminhado..."></textarea>
+    <p class="sub" style="margin:6px 0 14px">Campos disponíveis: <code>{nome}</code> (primeiro nome do cliente), <code>{instituicao}</code>.</p>
+
+    <div style="margin-bottom:6px;font-size:13px;color:#94a3b8">Mensagem ao advogado</div>
+    <textarea id="msg-advogado" rows="8" placeholder="Alerta enviado ao advogado com o resumo do atendimento..."></textarea>
+    <p class="sub" style="margin:6px 0 8px">Campos disponíveis: <code>{nome}</code>, <code>{numero}</code>, <code>{area}</code>, <code>{motivo}</code>, <code>{ultimaMensagem}</code>, <code>{nomeAdvogado}</code>, <code>{instituicao}</code>.</p>
+
+    <button class="btn-save" onclick="salvarMensagens()">Salvar mensagens</button>
+    <button class="btn-reset" onclick="restaurarMensagens()">Restaurar padrão</button>
+    <div class="status" id="status-msg"></div>
+  </div>
+
   <!-- Advogados de redirecionamento -->
   <div class="card">
     <h2>Advogados de redirecionamento</h2>
@@ -168,6 +187,20 @@ const HTML = `<!DOCTYPE html>
     <button class="btn-save" onclick="salvarAdvs()">Salvar advogados</button>
     <div class="status" id="status-adv"></div>
     <p class="sub" style="margin-top:16px">Número no formato país + DDD + número, só dígitos. Áreas separadas por vírgula (ex: <code>trabalhista, familia</code>).</p>
+  </div>
+
+  <!-- Atendimento por cliente (pausar/reativar o bot) -->
+  <div class="card">
+    <h2>Atendimento por cliente</h2>
+    <p class="sub">Ligue ou desligue o bot para cada cliente. Ao encaminhar para um advogado, o bot <b>pausa sozinho</b> — reative quando quiser que ele volte a atender. Enquanto pausado, uma pessoa responde pelo WhatsApp e o bot fica em silêncio.</p>
+
+    <div class="add" style="justify-content:flex-end">
+      <button class="btn-add" onclick="carregarAtendimentos()" title="Atualizar lista">↻ Atualizar</button>
+    </div>
+
+    <div id="atendimentos"></div>
+    <div id="atendimentos-vazio" class="vazio" style="display:none">Nenhum cliente cadastrado ainda.</div>
+    <div class="status" id="status-atend"></div>
   </div>
 
   <!-- Contexto dos clientes -->
@@ -413,7 +446,7 @@ const HTML = `<!DOCTYPE html>
       (d.clientes || []).forEach((c) => {
         const o = document.createElement('option');
         o.value = c.id;
-        o.textContent = (c.nome || c.numero) + ' (' + c.numero + ')';
+        o.textContent = (c.pausado ? '⏸ ' : '') + (c.nome || c.numero) + ' (' + c.numero + ')';
         sel.appendChild(o);
       });
       if (selecionado) sel.value = selecionado;
@@ -480,11 +513,104 @@ const HTML = `<!DOCTYPE html>
     } catch (e) { setStatusApiKey('Erro ao salvar: ' + e.message, false); }
   }
 
+  // ---- Mensagens de encaminhamento ----
+  let msgPadrao = { cliente: '', advogado: '' };
+  function setStatusMsg(msg, ok){
+    const s = document.getElementById('status-msg');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  async function carregarMensagens(){
+    try {
+      const r = await fetch('/api/mensagens');
+      const d = await r.json();
+      msgPadrao = { cliente: d.padraoCliente || '', advogado: d.padraoAdvogado || '' };
+      document.getElementById('msg-cliente').value = d.cliente || '';
+      document.getElementById('msg-advogado').value = d.advogado || '';
+    } catch (e) { setStatusMsg('Erro ao carregar: ' + e.message, false); }
+  }
+  async function salvarMensagens(){
+    const cliente = document.getElementById('msg-cliente').value;
+    const advogado = document.getElementById('msg-advogado').value;
+    try {
+      const r = await fetch('/api/mensagens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cliente, advogado }) });
+      const d = await r.json();
+      if (d.erro) return setStatusMsg('Erro: ' + d.erro, false);
+      document.getElementById('msg-cliente').value = d.cliente || '';
+      document.getElementById('msg-advogado').value = d.advogado || '';
+      setStatusMsg('Mensagens salvas! Já valem para os próximos encaminhamentos.', true);
+    } catch (e) { setStatusMsg('Erro ao salvar: ' + e.message, false); }
+  }
+  function restaurarMensagens(){
+    document.getElementById('msg-cliente').value = msgPadrao.cliente;
+    document.getElementById('msg-advogado').value = msgPadrao.advogado;
+    setStatusMsg('Padrão carregado no editor. Clique em "Salvar mensagens" para aplicar.', true);
+  }
+
+  // ---- Atendimento por cliente (pausar/reativar) ----
+  function setStatusAtend(msg, ok){
+    const s = document.getElementById('status-atend');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  async function carregarAtendimentos(){
+    try {
+      const r = await fetch('/api/clientes');
+      const d = await r.json();
+      renderAtendimentos(d.clientes || []);
+    } catch (e) { setStatusAtend('Erro ao carregar: ' + e.message, false); }
+  }
+  function renderAtendimentos(clientes){
+    const box = document.getElementById('atendimentos');
+    box.innerHTML = '';
+    document.getElementById('atendimentos-vazio').style.display = clientes.length ? 'none' : 'block';
+    clientes.forEach((c) => {
+      const pausado = !!c.pausado;
+      const div = document.createElement('div');
+      div.className = 'adv';
+      div.style.display = 'flex';
+      div.style.alignItems = 'center';
+      div.style.gap = '10px';
+      div.innerHTML =
+        '<div style="flex:1">' +
+          '<div style="font-weight:600">' + esc(c.nome || c.numero) + '</div>' +
+          '<div class="sub" style="margin:2px 0 0">' + esc(c.numero) + ' · ' +
+            (pausado ? '⏸ Atendimento humano' : '🤖 Bot ativo') +
+          '</div>' +
+        '</div>';
+      const b = document.createElement('button');
+      b.className = pausado ? 'btn-add' : 'btn-rem';
+      b.textContent = pausado ? '▶ Reativar' : '⏸ Pausar';
+      b.onclick = () => togglePausa(c.id, !pausado);
+      div.appendChild(b);
+      box.appendChild(div);
+    });
+  }
+  async function togglePausa(id, pausado){
+    try {
+      const r = await fetch('/api/cliente/pausa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, pausado }) });
+      const d = await r.json();
+      if (d.erro) return setStatusAtend('Erro: ' + d.erro, false);
+      await carregarAtendimentos();
+      carregarClientes(); // atualiza os marcadores no dropdown de contexto
+      if (!pausado) {
+        // Reativou o bot: orienta a atualizar o contexto e abre o editor no cliente.
+        setStatusAtend('Bot reativado. Atualize o contexto deste cliente (logo abaixo) com o que foi conversado durante o atendimento humano.', true);
+        const sel = document.getElementById('cliente-sel');
+        sel.value = String(id);
+        carregarCliente();
+        document.getElementById('cliente-md').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        setStatusAtend('Cliente pausado. O bot não vai responder até você reativar.', true);
+      }
+    } catch (e) { setStatusAtend('Erro ao alterar: ' + e.message, false); }
+  }
+
   carregarApiKey();
   carregarWhitelist();
   carregarPersonalidade();
+  carregarMensagens();
   carregarAdvs();
   carregarClientes();
+  carregarAtendimentos();
   atualizarStatus();
   setInterval(atualizarStatus, 2500); // verifica a conexao a cada 2,5s
 </script>
@@ -589,6 +715,20 @@ function iniciarPainel(porta = 3000) {
       return lerCorpo(req, res, (corpo) => salvarPersonalidade(corpo.texto));
     }
 
+    // Ler as mensagens de encaminhamento (texto atual + defaults de fabrica).
+    if (req.method === 'GET' && req.url === '/api/mensagens') {
+      const m = getMensagens();
+      return enviarJson(res, 200, {
+        cliente: m.cliente, advogado: m.advogado,
+        padraoCliente: MSG_CLIENTE_PADRAO, padraoAdvogado: MSG_ADVOGADO_PADRAO,
+      });
+    }
+
+    // Salvar as mensagens de encaminhamento.
+    if (req.method === 'POST' && req.url === '/api/mensagens') {
+      return lerCorpo(req, res, (corpo) => salvarMensagens(corpo));
+    }
+
     // Ler os advogados de redirecionamento.
     if (req.method === 'GET' && req.url === '/api/advogados') {
       return enviarJson(res, 200, { advogados: getAdvogados() });
@@ -603,6 +743,7 @@ function iniciarPainel(porta = 3000) {
     if (req.method === 'GET' && req.url === '/api/clientes') {
       const clientes = db.listClientes().map((c) => ({
         id: c.id, numero: c.numero_telefone, nome: c.nome_display, arquivo_md: c.arquivo_md,
+        pausado: c.pausado ? 1 : 0,
       }));
       return enviarJson(res, 200, { clientes });
     }
@@ -627,6 +768,17 @@ function iniciarPainel(porta = 3000) {
         if (!c.arquivo_md) throw new Error('Cliente sem arquivo de contexto.');
         escreverMarkdown(c.arquivo_md, corpo.conteudo || '');
         return { ok: true };
+      });
+    }
+
+    // Pausar/reativar o atendimento automatico de um cliente.
+    if (req.method === 'POST' && req.url === '/api/cliente/pausa') {
+      return lerCorpo(req, res, (corpo) => {
+        const c = db.getCliente(Number(corpo.id));
+        if (!c) throw new Error('Cliente não encontrado.');
+        const pausado = corpo.pausado ? 1 : 0;
+        db.setPausado(c.id, pausado);
+        return { ok: true, pausado };
       });
     }
 
