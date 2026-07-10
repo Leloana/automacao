@@ -252,9 +252,8 @@ const HTML = `<!DOCTYPE html>
     <div id="advs"></div>
     <div id="advs-vazio" class="vazio" style="display:none">Nenhum advogado cadastrado.</div>
 
-    <button class="btn-save" onclick="salvarAdvs()">Salvar advogados</button>
     <div class="status" id="status-adv"></div>
-    <p class="sub" style="margin-top:16px">Número no formato país + DDD + número, só dígitos. Áreas separadas por vírgula (ex: <code>trabalhista, familia</code>). Você pode editar os advogados já cadastrados na lista abaixo e clicar em "Salvar advogados".</p>
+    <p class="sub" style="margin-top:16px">Número no formato país + DDD + número, só dígitos. Áreas separadas por vírgula (ex: <code>trabalhista, familia</code>). Você pode editar os advogados na lista abaixo — <b>as mudanças são salvas automaticamente</b>.</p>
   </div>
 
   <!-- Atendimento por cliente (pausar/reativar o bot) -->
@@ -429,26 +428,35 @@ const HTML = `<!DOCTYPE html>
         '</div>';
       box.appendChild(div);
     });
-    // Liga os eventos dos campos a model "advogados".
+    // Liga os eventos dos campos a model "advogados". Tudo salva automaticamente.
     box.querySelectorAll('input[data-k]').forEach((el) => {
-      el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', () => {
-        const i = Number(el.getAttribute('data-i'));
-        const k = el.getAttribute('data-k');
-        if (k === 'padrao') {
-          // "Padrão" e exclusivo: marcar um desmarca os outros.
-          advogados.forEach((x, j) => { x.padrao = (j === i) ? el.checked : false; });
-          renderAdvs();
-        } else if (k === 'ativo') {
-          advogados[i].ativo = el.checked;
-        } else if (k === 'areas') {
-          advogados[i].areas = el.value.split(',').map((s) => s.trim()).filter(Boolean);
-        } else {
-          advogados[i][k] = el.value;
-        }
-      });
+      const k = el.getAttribute('data-k');
+      if (el.type === 'checkbox') {
+        el.addEventListener('change', () => {
+          const i = Number(el.getAttribute('data-i'));
+          if (k === 'padrao') {
+            // "Padrão" e exclusivo: marcar um desmarca os outros.
+            advogados.forEach((x, j) => { x.padrao = (j === i) ? el.checked : false; });
+          } else {
+            advogados[i].ativo = el.checked;
+          }
+          persistirAdvs(true); // re-renderiza (estado dos checkboxes)
+        });
+      } else {
+        // Texto: atualiza a memoria enquanto digita e SALVA ao sair do campo.
+        el.addEventListener('input', () => {
+          const i = Number(el.getAttribute('data-i'));
+          if (k === 'areas') advogados[i].areas = el.value.split(',').map((s) => s.trim()).filter(Boolean);
+          else advogados[i][k] = el.value;
+        });
+        el.addEventListener('change', () => persistirAdvs(false));
+      }
     });
     box.querySelectorAll('button[data-rem]').forEach((b) => {
-      b.addEventListener('click', () => { advogados.splice(Number(b.getAttribute('data-rem')), 1); renderAdvs(); });
+      b.addEventListener('click', () => {
+        advogados.splice(Number(b.getAttribute('data-rem')), 1);
+        persistirAdvs(true, 'Advogado removido.');
+      });
     });
   }
   function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -468,8 +476,7 @@ const HTML = `<!DOCTYPE html>
     document.getElementById('adv-areas').value = '';
     document.getElementById('adv-padrao').checked = false;
     document.getElementById('adv-ativo').checked = true;
-    renderAdvs();
-    setStatusAdv('Advogado adicionado à lista. Clique em "Salvar advogados" para aplicar.', true);
+    persistirAdvs(true, 'Advogado adicionado e salvo.');
   }
   async function carregarAdvs(){
     try {
@@ -479,14 +486,19 @@ const HTML = `<!DOCTYPE html>
       renderAdvs();
     } catch (e) { setStatusAdv('Erro ao carregar: ' + e.message, false); }
   }
-  async function salvarAdvs(){
+  // Salva a lista atual no servidor. rerender: re-sincroniza a partir da resposta
+  // (usado em adicionar/remover/checkbox); em edicoes de texto salvamos sem
+  // re-renderizar para nao atrapalhar quem ainda esta digitando.
+  async function persistirAdvs(rerender, msg){
     try {
       const r = await fetch('/api/advogados', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ advogados }) });
       const d = await r.json();
-      if (d.erro) return setStatusAdv('Erro: ' + d.erro, false);
-      advogados = (d.advogados || []).map((a) => ({ nome: a.nome||'', numero: a.numero||'', areas: a.areas||[], padrao: !!a.padrao, ativo: a.ativo !== false }));
-      renderAdvs();
-      setStatusAdv('Advogados salvos! Já valem para os próximos atendimentos.', true);
+      if (d.erro) return setStatusAdv('Erro ao salvar: ' + d.erro, false);
+      if (rerender) {
+        advogados = (d.advogados || []).map((a) => ({ nome: a.nome||'', numero: a.numero||'', areas: a.areas||[], padrao: !!a.padrao, ativo: a.ativo !== false }));
+        renderAdvs();
+      }
+      setStatusAdv(msg || 'Alterações salvas.', true);
     } catch (e) { setStatusAdv('Erro ao salvar: ' + e.message, false); }
   }
 
