@@ -961,7 +961,17 @@ function iniciarPainel(porta = 3000) {
     res.end('Nao encontrado');
   });
 
-  server.on('error', (e) => console.error('Erro no painel web:', e.message));
+  server.on('error', (e) => {
+    if (e.code === 'EADDRINUSE') {
+      // Porta ocupada = o bot ja esta aberto em outra janela. Encerra com uma
+      // mensagem clara em vez de deixar o erro estourar em cascata (o iniciar.bat
+      // ja tenta encerrar a instancia anterior automaticamente antes de subir).
+      console.error(`A porta ${porta} ja esta em uso: o bot provavelmente ja esta aberto em outra janela. ` +
+        'Feche a outra janela do bot (ou reinicie o computador) e abra novamente.');
+      process.exit(1);
+    }
+    console.error('Erro no painel web:', e.message);
+  });
   server.listen(porta, '127.0.0.1', () => {
     console.log(`Painel disponivel em http://localhost:${porta}`);
   });

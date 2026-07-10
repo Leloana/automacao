@@ -79,6 +79,39 @@ if errorlevel 1 (
 )
 
 rem ============================================================
+rem 0.1) Guard de instancia unica: se o bot JA esta aberto (painel na porta
+rem      3000), abrir de novo quebra tudo — a porta e a sessao do WhatsApp ficam
+rem      "em uso" (EADDRINUSE, "browser already running", "Acesso negado" nos
+rem      arquivos do Chrome). Entao ENCERRAMOS a instancia anterior (o node e o
+rem      Chrome filho dele) e seguimos com a nova. So matamos se o dono da porta
+rem      for mesmo um node.exe (para nao fechar outro programa por engano).
+rem ============================================================
+set "OLD_PID="
+for /f "tokens=5" %%p in ('netstat -ano -p tcp 2^>nul ^| findstr /C:"127.0.0.1:3000" ^| findstr /C:"LISTENING"') do set "OLD_PID=%%p"
+if defined OLD_PID (
+  set "OLD_IMG="
+  for /f "tokens=1" %%n in ('tasklist /FI "PID eq !OLD_PID!" /NH 2^>nul') do set "OLD_IMG=%%n"
+  if /I "!OLD_IMG!"=="node.exe" (
+    echo [INFO] O bot ja estava aberto ^(PID !OLD_PID!^). Encerrando a instancia anterior...
+    taskkill /F /T /PID !OLD_PID! >nul 2>nul
+    rem Espera a porta e a sessao do WhatsApp serem liberadas pelo Windows.
+    timeout /t 4 /nobreak >nul
+    echo [OK] Instancia anterior encerrada. Iniciando de novo...
+    echo.
+  ) else (
+    echo.
+    echo ============================================
+    echo  [ATENCAO] A porta 3000 esta ocupada por outro programa
+    echo  ^(!OLD_IMG!^), nao pelo bot. Feche esse programa ou reinicie o
+    echo  computador antes de abrir o bot.
+    echo ============================================
+    echo.
+    pause
+    exit /b 1
+  )
+)
+
+rem ============================================================
 rem 1) Node.js (OBRIGATORIO) - sem ele o bot nao roda.
 rem    ATENCAO: os modulos nativos (better-sqlite3) sao compilados para UMA
 rem    versao MAIOR do Node (ABI). Este projeto foi feito no Node 22, entao
@@ -260,6 +293,13 @@ rem pagina abria com erro (precisava apertar F5). Agora um processo em segundo
 rem plano testa a porta e so abre quando ela responde (espera ate ~90s).
 rem Roda minimizado e separado, para nao travar o bot.
 start "" /min powershell -NoProfile -WindowStyle Hidden -Command "$u='http://localhost:3000'; for($i=0;$i -lt 45;$i++){ try { [void](Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 $u); break } catch { Start-Sleep -Seconds 2 } }; Start-Process $u"
+
+rem Remove travas antigas da sessao do WhatsApp. Quando a instancia anterior e
+rem encerrada a forca (ou o PC desliga sem fechar o bot), o Chrome deixa arquivos
+rem "Singleton*" para tras e o proximo boot falha com "browser already running".
+rem E seguro apagar aqui: o guard no inicio ja garantiu que nao ha outra
+rem instancia do bot rodando.
+del /s /q "data\sessions\SingletonLock" "data\sessions\SingletonCookie" "data\sessions\SingletonSocket" >nul 2>nul
 
 rem ============================================================
 rem 5) Inicia o bot.
