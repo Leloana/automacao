@@ -7,6 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const { setDeepseekKey } = require('./bot');
 const { setGeminiKey } = require('./midia');
+const { setWhatsappToken, setWhatsappPhoneId } = require('./whatsapp');
+const { setTelegramToken } = require('./telegram');
 
 const ENV_PATH = path.join(__dirname, '.env');
 const ENV_EXEMPLO = path.join(__dirname, '.env.example');
@@ -94,4 +96,53 @@ function salvarChaveGemini(chave) {
   return statusGemini();
 }
 
-module.exports = { status, salvarChave, chaveAtual, mascarar, statusGemini, salvarChaveGemini };
+// ---- WhatsApp oficial (Cloud API da Meta) ----
+
+// Status do WhatsApp: token (mascarado) + ID do numero. O ID do numero nao e
+// segredo, entao vai inteiro para o painel exibir/conferir.
+function statusWhatsapp() {
+  const token = valorEnv('WHATSAPP_TOKEN');
+  return {
+    configurada: !!token,
+    mascara: mascarar(token),
+    phoneId: valorEnv('WHATSAPP_PHONE_NUMBER_ID'),
+  };
+}
+
+// Grava o token do WhatsApp e aplica na hora (proxima mensagem ja usa).
+function salvarChaveWhatsapp(chave) {
+  chave = validarChave(chave);
+  gravarEnv('WHATSAPP_TOKEN', chave);
+  setWhatsappToken(chave);
+  return statusWhatsapp();
+}
+
+// Grava o ID do numero do WhatsApp (nao e segredo; validado como nao-vazio).
+function salvarPhoneIdWhatsapp(id) {
+  id = String(id == null ? '' : id).trim();
+  if (!id) throw new Error('Informe o ID do número do WhatsApp.');
+  gravarEnv('WHATSAPP_PHONE_NUMBER_ID', id);
+  setWhatsappPhoneId(id);
+  return statusWhatsapp();
+}
+
+// ---- Telegram (aviso ao advogado) ----
+
+function statusTelegram() {
+  const token = valorEnv('TELEGRAM_BOT_TOKEN');
+  return { configurada: !!token, mascara: mascarar(token) };
+}
+
+function salvarChaveTelegram(chave) {
+  chave = validarChave(chave);
+  gravarEnv('TELEGRAM_BOT_TOKEN', chave);
+  setTelegramToken(chave);
+  return statusTelegram();
+}
+
+module.exports = {
+  status, salvarChave, chaveAtual, mascarar,
+  statusGemini, salvarChaveGemini,
+  statusWhatsapp, salvarChaveWhatsapp, salvarPhoneIdWhatsapp,
+  statusTelegram, salvarChaveTelegram,
+};

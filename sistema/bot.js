@@ -13,6 +13,7 @@ const { buscarProcessosPorCliente } = require('./crm');
 const { numeroPermitido } = require('./whitelist');
 const { renderMensagemCliente, renderMensagemAdvogado } = require('./mensagens');
 const midia = require('./midia');
+const telegram = require('./telegram');
 const avisos = require('./avisos');
 
 // Identifica se um erro da API e de autenticacao (chave invalida/ausente).
@@ -231,8 +232,8 @@ const pendentes = new Map();
  * Handler de mensagens. Faz os filtros e identifica o remetente, mas NAO
  * responde na hora: acumula a mensagem em um buffer e (re)agenda o
  * processamento do lote. Assim, varias mensagens seguidas viram uma so resposta.
- * @param {import('whatsapp-web.js').Client} client
- * @param {import('whatsapp-web.js').Message} message
+ * @param {object} client  modulo de transporte do WhatsApp (ver whatsapp.js)
+ * @param {object} message objeto "mensagem" produzido por whatsapp.parseWebhook
  */
 async function handleMessage(client, message) {
   const from = message.from || '';
@@ -388,24 +389,24 @@ async function tratarMidia(client, message, numero, nomeDisplay) {
     console.error('Falha ao responder midia ao cliente:', e.message);
   }
 
-  // Alerta o numero padrao.
+  // Alerta o advogado padrao pelo Telegram (o WhatsApp oficial exigiria template
+  // para mensagem iniciada pelo negocio — ver telegram.js).
   try {
-    const instituicao = db.getInstituicao(INSTITUICAO_PADRAO_ID);
     const advPadrao = escolherAdvogado(); // sem area -> advogado padrao / primeiro ativo
-    const numeroPadrao = (advPadrao && advPadrao.numero) || (instituicao && instituicao.numero_humano);
-    if (numeroPadrao) {
+    const chatPadrao = (advPadrao && advPadrao.telegram_chat_id) || '';
+    if (telegram.temTelegramConfig() && (chatPadrao || telegram.chatPadrao())) {
       const tipo = NOMES_MIDIA[message.type] || 'mídia';
       const aviso =
-        '🔔 *Atendimento precisa de atenção (mídia recebida)*\n\n' +
+        '🔔 Atendimento precisa de atenção (mídia recebida)\n\n' +
         `Cliente: ${nomeDisplay}\n` +
         `Número: ${numero}\n` +
         `Tipo: ${tipo}\n\n` +
         'O assistente virtual não consegue processar áudios, imagens ou arquivos. ' +
         'O cliente foi avisado de que uma pessoa vai responder — entre em contato.';
-      await client.sendMessage(`${numeroPadrao}@c.us`, aviso);
-      console.log(`[MIDIA] ${numero} (${nomeDisplay}) enviou ${message.type}; cliente avisado e alerta para ${numeroPadrao}.`);
+      await telegram.enviarAviso(chatPadrao, aviso);
+      console.log(`[MIDIA] ${numero} (${nomeDisplay}) enviou ${message.type}; cliente avisado e alerta no Telegram.`);
     } else {
-      console.warn('[MIDIA] Sem numero padrao configurado para alertar.');
+      console.warn('[MIDIA] Sem Telegram configurado para alertar sobre midia.');
     }
   } catch (e) {
     console.error('Falha ao alertar sobre midia:', e.message);
@@ -445,8 +446,8 @@ function enfileirarMensagem(client, from, texto, message, numero, nomeDisplay) {
 /**
  * Processa um lote de mensagens ja agrupadas: monta o contexto, consulta a
  * DeepSeek e responde ao cliente.
- * @param {import('whatsapp-web.js').Client} client
- * @param {import('whatsapp-web.js').Message} message  ultima mensagem do lote (usada no reply)
+ * @param {object} client  modulo de transporte do WhatsApp (ver whatsapp.js)
+ * @param {object} message ultima mensagem do lote (usada no reply)
  * @param {string} texto  texto combinado de todas as mensagens do lote
  * @param {string} numero
  * @param {string} nomeDisplay
@@ -557,7 +558,7 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
     if (dados.escalar) {
       // 9a) Escolhe o advogado da area (com fallbacks) e monta a mensagem de contato.
       const advogado = escolherAdvogado(dados.area);
-      const numeroHumano = advogado ? advogado.numero : instituicao.numero_humano;
+      const chatAdvogado = (advogado && advogado.telegram_chat_id) || '';
 
       // Mensagem ao cliente (template editavel pelo painel — ver mensagens.js).
       mensagemCliente = renderMensagemCliente({
@@ -565,9 +566,12 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
         instituicao: instituicao.nome,
       });
 
-      // 9b) Avisa o advogado com um resumo do atendimento encaminhado (template
-      // editavel pelo painel — ver mensagens.js).
-      if (numeroHumano) {
+      // 9b) Avisa o advogado pelo Telegram, com um resumo do atendimento (template
+      // editavel pelo painel — ver mensagens.js). Vai pelo Telegram e nao pelo
+      // WhatsApp porque, no WhatsApp oficial, mensagem iniciada pelo negocio para
+      // quem nao abriu conversa exigiria template aprovado pela Meta (ver telegram.js).
+      const temDestino = telegram.temTelegramConfig() && (chatAdvogado || telegram.chatPadrao());
+      if (temDestino) {
         const aviso = renderMensagemAdvogado({
           nome: nomeDisplay,
           numero,
@@ -578,18 +582,18 @@ async function processarMensagens(client, message, texto, numero, nomeDisplay) {
           instituicao: instituicao.nome,
         });
         try {
-          await client.sendMessage(`${numeroHumano}@c.us`, aviso);
+          await telegram.enviarAviso(chatAdvogado, aviso);
         } catch (notifyErr) {
           // Falha ao avisar o advogado nao deve impedir a resposta ao cliente.
           console.error('Falha ao avisar o advogado:', notifyErr.message);
           avisos.registrar('aviso', 'Não consegui avisar um advogado sobre um encaminhamento.',
-            `Advogado: ${(advogado && advogado.nome) || numeroHumano}. Confira o número dele na aba "Advogados". O cliente ${nomeDisplay || numero} foi avisado de que será contatado.`);
+            `Advogado: ${(advogado && advogado.nome) || 'padrão'}. Confira o Telegram dele na aba "Advogados". O cliente ${nomeDisplay || numero} foi avisado de que será contatado.`);
         }
       } else {
-        // Nenhum advogado/numero configurado: o cliente foi avisado que sera
-        // contatado, mas nao ha para quem encaminhar.
-        avisos.registrar('erro', 'Um cliente precisa de atendimento humano, mas não há advogado configurado.',
-          `Cliente ${nomeDisplay || numero} (área: ${dados.area || 'geral'}). Cadastre um advogado na aba "Advogados" para receber os encaminhamentos.`);
+        // Sem Telegram configurado ou advogado sem chat: o cliente foi avisado que
+        // sera contatado, mas nao ha para quem encaminhar o alerta.
+        avisos.registrar('erro', 'Um cliente precisa de atendimento humano, mas o aviso ao advogado não pôde ser enviado.',
+          `Cliente ${nomeDisplay || numero} (área: ${dados.area || 'geral'}). Configure o Telegram (aba "Chave da API") e o chat do advogado (aba "Advogados").`);
       }
 
       // 9b-2) Pausa o atendimento automatico: a partir da PROXIMA mensagem o bot

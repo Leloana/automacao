@@ -5,7 +5,6 @@
 // Sobe junto com o bot e escuta apenas em 127.0.0.1 (nao exposto na rede).
 
 const http = require('http');
-const qrcode = require('qrcode');
 const { lerConfig, salvarConfig, soDigitos, variantes } = require('./whitelist');
 const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require('./prompt');
 const { getMensagens, salvarMensagens, MSG_CLIENTE_PADRAO, MSG_ADVOGADO_PADRAO } = require('./mensagens');
@@ -15,34 +14,33 @@ const escritorio = require('./escritorio');
 const apikey = require('./apikey');
 const db = require('./db');
 const avisos = require('./avisos');
+const whatsapp = require('./whatsapp');
 
 // Instituicao usada ao cadastrar um cliente pelo painel (mesma logica do bot).
 const INSTITUICAO_PADRAO_ID = Number(process.env.INSTITUICAO_PADRAO_ID) || 1;
 
-// Estado da conexao do WhatsApp, atualizado pelo index.js via setStatus/setQR.
-// status: 'carregando' | 'qr' | 'conectado' | 'desconectado' | 'falha'
-let estado = { status: 'carregando', qrDataUrl: null };
+// Estado da conexao do WhatsApp, atualizado pelo index.js via setStatus.
+// status: 'carregando' | 'conectado' | 'desconectado' | 'falha'
+// ("conectado" = ha token + numero configurados; o WhatsApp oficial e stateless).
+let estado = { status: 'carregando' };
 
-// Handler de "trocar WhatsApp", registrado pelo index.js (que detem o client).
-let trocarHandler = null;
-function setTrocarHandler(fn) { trocarHandler = fn; }
+// Handler que recebe cada mensagem ja convertida do webhook. Registrado pelo
+// index.js (que detem o handleMessage do bot).
+let webhookHandler = null;
+function setWebhookHandler(fn) { webhookHandler = fn; }
 
-function setStatus(status) {
-  estado.status = status;
-  // Ao conectar/desconectar, o QR antigo nao serve mais.
-  if (status === 'conectado' || status === 'desconectado' || status === 'falha') {
-    estado.qrDataUrl = null;
-  }
-}
+function setStatus(status) { estado.status = status; }
 
-// Recebe a string do QR (vinda do whatsapp-web.js) e gera uma imagem (data URL).
-async function setQR(qrString) {
-  try {
-    estado.qrDataUrl = await qrcode.toDataURL(qrString, { margin: 1, width: 280 });
-    estado.status = 'qr';
-  } catch (e) {
-    console.error('Erro ao gerar imagem do QR:', e.message);
-  }
+// Deduplica entregas repetidas do webhook: a Meta reenvia se o endpoint demora
+// ou falha, e pode entregar a mesma mensagem mais de uma vez. Guardamos os
+// ultimos ids vistos (limite simples de memoria).
+const idsVistos = new Set();
+function jaVisto(id) {
+  if (!id) return false;
+  if (idsVistos.has(id)) return true;
+  idsVistos.add(id);
+  if (idsVistos.size > 500) idsVistos.delete(idsVistos.values().next().value);
+  return false;
 }
 
 // Pagina HTML (interface). Vanilla JS + fetch, sem dependencias no navegador.
@@ -182,21 +180,44 @@ const HTML = `<!DOCTYPE html>
     <button class="btn-save" onclick="salvarGeminiKey()">Salvar chave do Google</button>
     <div class="status" id="status-gemini"></div>
 
+    <hr style="border:none;border-top:1px solid #334155;margin:24px 0" />
+
+    <h2>WhatsApp oficial (Meta)<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">O token de acesso e o ID do número da API oficial do WhatsApp (Cloud API da Meta). É por aqui que o bot recebe e envia mensagens. O token é gerado no painel da Meta (use um token permanente de "Usuário do sistema", não o temporário de 24h).</span></span></h2>
+    <p class="sub">Token de acesso e ID do número da <b>API oficial do WhatsApp</b>. Sem eles o bot não recebe nem responde mensagens.</p>
+    <div id="wa-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="wa-estado-txt">Verificando...</span></div>
+    <div class="add">
+      <input type="password" id="wa-token" placeholder="Cole aqui o token de acesso" autocomplete="off" />
+      <button class="btn-add" onclick="mostrarChaveWa()" title="Mostrar/ocultar">👁</button>
+    </div>
+    <button class="btn-save" onclick="salvarWaToken()">Salvar token do WhatsApp</button>
+    <div class="add" style="margin-top:12px">
+      <input type="text" id="wa-phoneid" placeholder="ID do número (Phone Number ID)" autocomplete="off" />
+    </div>
+    <button class="btn-save" onclick="salvarWaPhoneId()">Salvar ID do número</button>
+    <div class="status" id="status-wa"></div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:24px 0" />
+
+    <h2>Telegram — aviso ao advogado<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Quando o bot encaminha um cliente para um advogado, o aviso é enviado por Telegram (grátis e instantâneo). Crie um bot com o @BotFather no Telegram e cole aqui o token. O chat de cada advogado é configurado na aba "Advogados".</span></span></h2>
+    <p class="sub">Token do bot do Telegram usado para <b>avisar o advogado</b> nos encaminhamentos. Crie o bot com o <code>@BotFather</code>.</p>
+    <div id="tg-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="tg-estado-txt">Verificando...</span></div>
+    <div class="add">
+      <input type="password" id="tg-token" placeholder="Cole aqui o token do bot do Telegram" autocomplete="off" />
+      <button class="btn-add" onclick="mostrarChaveTg()" title="Mostrar/ocultar">👁</button>
+    </div>
+    <button class="btn-save" onclick="salvarTgToken()">Salvar token do Telegram</button>
+    <div class="status" id="status-tg"></div>
+
     <p class="sub" style="margin-top:16px">As chaves ficam guardadas só neste computador (arquivo <code>.env</code>) e nunca vão para a internet nem para o repositório.</p>
   </div>
 
-  <!-- Conexao do WhatsApp -->
+  <!-- Conexao do WhatsApp (API oficial da Meta) -->
   <div class="card" id="sec-conexao">
-    <h1>Conexão do WhatsApp<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Mostra se o bot está conectado ao WhatsApp do escritório. Se aparecer um QR code, escaneie com o celular para conectar. Use "Trocar de WhatsApp" para conectar outro número.</span></span></h1>
-    <p class="sub">Status da conexão do bot com o WhatsApp do escritório.</p>
+    <h1>Conexão do WhatsApp<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">O bot usa a API oficial do WhatsApp (Meta). Não há QR code: a conexão é feita pelo token e pelo ID do número, configurados na aba "Chave da API". Aqui você vê se está tudo certo.</span></span></h1>
+    <p class="sub">O bot usa a <b>API oficial do WhatsApp</b> (Meta). A conexão é pelo token — não há QR code.</p>
     <div id="banner" class="banner b-carregando"><span class="dot"></span><span id="banner-txt">Carregando...</span></div>
-    <div id="qrbox" class="qrbox" style="display:none">
-      <img id="qrimg" alt="QR code" />
-      <p>No WhatsApp: <b>Aparelhos conectados &gt; Conectar um aparelho</b> e aponte para este código.</p>
-    </div>
-    <button class="btn-trocar" onclick="trocarWhatsapp()">Trocar de WhatsApp</button>
-    <p class="sub" style="margin:8px 0 0">Desconecta a conta atual, apaga a sessão e gera um novo QR code para outro número escanear.</p>
-    <div class="status" id="status-trocar"></div>
+    <p class="sub" style="margin:16px 0 0" id="conexao-detalhe"></p>
+    <p class="sub" style="margin:8px 0 0">Para configurar ou trocar o número, use o token e o ID do número na aba <b>Chave da API</b>.</p>
   </div>
 
   <!-- Escritorio (areas atendidas + informacoes gerais) -->
@@ -277,8 +298,9 @@ Localização: Londrina, PR
     <div class="adv">
       <div class="row">
         <div class="field"><label>Nome</label><input type="text" id="adv-nome" placeholder="Ex: Dra. Maria" /></div>
-        <div class="field"><label>Número (WhatsApp)</label><input type="text" id="adv-numero" placeholder="5514998689481" /></div>
+        <div class="field"><label>Número (WhatsApp, opcional)</label><input type="text" id="adv-numero" placeholder="5514998689481" /></div>
       </div>
+      <div class="field"><label>Chat do Telegram (para receber os avisos)</label><input type="text" id="adv-telegram" placeholder="Ex: 123456789 ou -1001234567890 (grupo)" /></div>
       <div class="field"><label>Áreas (separadas por vírgula)</label><input type="text" id="adv-areas" placeholder="trabalhista, familia" /></div>
       <div class="checks">
         <label><input type="checkbox" id="adv-padrao" /> Padrão</label>
@@ -333,10 +355,9 @@ Localização: Londrina, PR
   // ---- Status da conexao (atualiza sozinho) ----
   const TEXTO = {
     carregando:   { cls: 'b-carregando',   txt: 'Iniciando o bot...' },
-    qr:           { cls: 'b-qr',           txt: 'Aguardando leitura — escaneie o QR code abaixo' },
-    conectado:    { cls: 'b-conectado',    txt: 'Conectado! O bot está atendendo.' },
-    desconectado: { cls: 'b-desconectado', txt: 'Desconectado. Reinicie o bot se necessário.' },
-    falha:        { cls: 'b-falha',        txt: 'Falha na autenticação. Reinicie o bot.' },
+    conectado:    { cls: 'b-conectado',    txt: 'WhatsApp oficial configurado. O bot está atendendo.' },
+    desconectado: { cls: 'b-desconectado', txt: 'WhatsApp não configurado. Preencha o token e o ID do número na aba Chave da API.' },
+    falha:        { cls: 'b-falha',        txt: 'Falha na conexão com o WhatsApp oficial.' },
   };
   async function atualizarStatus(){
     try {
@@ -349,17 +370,30 @@ Localização: Londrina, PR
       // Reflete o status no "dot" do botao Conexão da barra lateral.
       const dot = document.getElementById('nav-dot');
       if (dot) {
-        const cores = { conectado: '#22c55e', qr: '#f59e0b', carregando: '#64748b', desconectado: '#ef4444', falha: '#ef4444' };
+        const cores = { conectado: '#22c55e', carregando: '#64748b', desconectado: '#ef4444', falha: '#ef4444' };
         dot.style.background = cores[s.status] || '#64748b';
       }
-      const qrbox = document.getElementById('qrbox');
-      if (s.status === 'qr' && s.qr) {
-        document.getElementById('qrimg').src = s.qr;
-        qrbox.style.display = 'block';
-      } else {
-        qrbox.style.display = 'none';
-      }
     } catch (e) { /* ignora; tenta de novo no proximo ciclo */ }
+  }
+
+  // Detalhe da conexao (ping ao token do WhatsApp): mostra o numero verificado ou
+  // o motivo da falha, tanto no card Conexão quanto no banner do WhatsApp na aba
+  // Chave da API. Chamado com menos frequencia que atualizarStatus.
+  async function atualizarWhatsappStatus(){
+    try {
+      const r = await fetch('/api/whatsapp-status');
+      const s = await r.json();
+      const det = document.getElementById('conexao-detalhe');
+      const est = document.getElementById('wa-estado');
+      const txt = document.getElementById('wa-estado-txt');
+      let msg, cls;
+      if (s.ok) { msg = 'Conectado ao número ' + (s.numero || '(desconhecido)') + (s.nome ? ' — ' + s.nome : '') + '.'; cls = 'b-conectado'; }
+      else if (s.motivo === 'nao_configurado') { msg = 'Ainda não configurado.'; cls = 'b-carregando'; }
+      else if (s.motivo === 'token_invalido') { msg = 'Token ou ID do número inválido' + (s.erro ? ' (' + s.erro + ')' : '') + '.'; cls = 'b-falha'; }
+      else { msg = 'Não foi possível verificar agora' + (s.erro ? ' (' + s.erro + ')' : '') + '.'; cls = 'b-desconectado'; }
+      if (det) det.textContent = msg;
+      if (est && txt) { est.className = 'banner ' + cls; txt.textContent = msg; }
+    } catch (e) { /* ignora */ }
   }
 
   // ---- Criar cliente ----
@@ -391,23 +425,78 @@ Localização: Londrina, PR
 
   document.getElementById('novo').addEventListener('keydown', (e) => { if (e.key === 'Enter') adicionar(); });
 
-  // ---- Trocar de WhatsApp ----
-  async function trocarWhatsapp(){
-    if (!confirm('Tem certeza? Isso vai DESCONECTAR o WhatsApp atual e apagar a sessão. Será preciso escanear um novo QR code para conectar outra conta.')) return;
-    const btn = document.querySelector('.btn-trocar');
-    const s = document.getElementById('status-trocar');
-    btn.disabled = true; btn.textContent = 'Trocando...';
-    s.textContent = 'Encerrando a sessão atual...'; s.className = 'status ok';
+  // ---- WhatsApp oficial (token + ID do numero) ----
+  function setStatusWa(msg, ok){
+    const s = document.getElementById('status-wa');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  function mostrarChaveWa(){
+    const inp = document.getElementById('wa-token');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+  async function carregarWaKey(){
     try {
-      const r = await fetch('/api/trocar', { method: 'POST' });
+      const r = await fetch('/api/apikey-whatsapp');
       const d = await r.json();
-      if (d.erro) { s.textContent = 'Erro: ' + d.erro; s.className = 'status erro'; }
-      else { s.textContent = 'Sessão apagada. Aguarde o novo QR code aparecer acima.'; s.className = 'status ok'; }
-    } catch (e) {
-      s.textContent = 'Erro ao trocar: ' + e.message; s.className = 'status erro';
-    } finally {
-      btn.disabled = false; btn.textContent = 'Trocar de WhatsApp';
-    }
+      const ph = document.getElementById('wa-phoneid');
+      if (ph && d.phoneId) ph.value = d.phoneId;
+    } catch (e) { /* ignora */ }
+    atualizarWhatsappStatus();
+  }
+  async function salvarWaToken(){
+    const chave = document.getElementById('wa-token').value.trim();
+    if (!chave) return setStatusWa('Cole o token antes de salvar.', false);
+    try {
+      const r = await fetch('/api/apikey-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: chave }) });
+      const d = await r.json();
+      if (d.erro) return setStatusWa('Erro: ' + d.erro, false);
+      document.getElementById('wa-token').value = '';
+      setStatusWa('Token salvo! Vale na hora (sem reiniciar).', true);
+      atualizarWhatsappStatus();
+    } catch (e) { setStatusWa('Erro ao salvar: ' + e.message, false); }
+  }
+  async function salvarWaPhoneId(){
+    const id = document.getElementById('wa-phoneid').value.trim();
+    if (!id) return setStatusWa('Informe o ID do número.', false);
+    try {
+      const r = await fetch('/api/apikey-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phoneId: id }) });
+      const d = await r.json();
+      if (d.erro) return setStatusWa('Erro: ' + d.erro, false);
+      setStatusWa('ID do número salvo!', true);
+      atualizarWhatsappStatus();
+    } catch (e) { setStatusWa('Erro ao salvar: ' + e.message, false); }
+  }
+
+  // ---- Telegram (aviso ao advogado) ----
+  function setStatusTg(msg, ok){
+    const s = document.getElementById('status-tg');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  function mostrarChaveTg(){
+    const inp = document.getElementById('tg-token');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+  async function carregarTgKey(){
+    try {
+      const r = await fetch('/api/apikey-telegram');
+      const d = await r.json();
+      const est = document.getElementById('tg-estado');
+      const txt = document.getElementById('tg-estado-txt');
+      if (d.configurada) { est.className = 'banner b-conectado'; txt.textContent = 'Token configurado (' + d.mascara + ').'; }
+      else { est.className = 'banner b-qr'; txt.textContent = 'Ainda não configurado (opcional, mas necessário para avisar o advogado).'; }
+    } catch (e) { /* ignora */ }
+  }
+  async function salvarTgToken(){
+    const chave = document.getElementById('tg-token').value.trim();
+    if (!chave) return setStatusTg('Cole o token antes de salvar.', false);
+    try {
+      const r = await fetch('/api/apikey-telegram', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: chave }) });
+      const d = await r.json();
+      if (d.erro) return setStatusTg('Erro: ' + d.erro, false);
+      document.getElementById('tg-token').value = '';
+      setStatusTg('Token salvo! Vale na hora (sem reiniciar).', true);
+      carregarTgKey();
+    } catch (e) { setStatusTg('Erro ao salvar: ' + e.message, false); }
   }
 
   // ---- Personalidade do bot ----
@@ -455,8 +544,9 @@ Localização: Londrina, PR
       div.innerHTML =
         '<div class="row">' +
           '<div class="field"><label>Nome</label><input type="text" data-i="' + i + '" data-k="nome" value="' + esc(a.nome) + '" placeholder="Ex: Dra. Maria" /></div>' +
-          '<div class="field"><label>Número (WhatsApp)</label><input type="text" data-i="' + i + '" data-k="numero" value="' + esc(a.numero) + '" placeholder="5514998689481" /></div>' +
+          '<div class="field"><label>Número (WhatsApp, opcional)</label><input type="text" data-i="' + i + '" data-k="numero" value="' + esc(a.numero) + '" placeholder="5514998689481" /></div>' +
         '</div>' +
+        '<div class="field"><label>Chat do Telegram (recebe os avisos)</label><input type="text" data-i="' + i + '" data-k="telegram_chat_id" value="' + esc(a.telegram_chat_id||'') + '" placeholder="Ex: 123456789 ou -1001234567890 (grupo)" /></div>' +
         '<div class="field"><label>Áreas (separadas por vírgula)</label><input type="text" data-i="' + i + '" data-k="areas" value="' + esc((a.areas||[]).join(', ')) + '" placeholder="trabalhista, familia" /></div>' +
         '<div class="checks">' +
           '<label><input type="checkbox" data-i="' + i + '" data-k="padrao"' + (a.padrao ? ' checked' : '') + ' /> Padrão</label>' +
@@ -501,16 +591,19 @@ Localização: Londrina, PR
   function adicionarAdv(){
     const nome = document.getElementById('adv-nome').value.trim();
     const numero = soDigitos(document.getElementById('adv-numero').value);
+    const telegram_chat_id = document.getElementById('adv-telegram').value.trim();
     if (!nome) return setStatusAdv('Informe o nome do advogado.', false);
-    if (numero.length < 12 || numero.length > 13) return setStatusAdv('Número inválido. Use país+DDD+número (12 ou 13 dígitos).', false);
+    if (numero && (numero.length < 12 || numero.length > 13)) return setStatusAdv('Número inválido. Use país+DDD+número (12 ou 13 dígitos).', false);
+    if (!numero && !telegram_chat_id) return setStatusAdv('Informe o chat do Telegram (é por onde o aviso chega) ou o número.', false);
     const areas = document.getElementById('adv-areas').value.split(',').map((s) => s.trim()).filter(Boolean);
     const padrao = document.getElementById('adv-padrao').checked;
     const ativo = document.getElementById('adv-ativo').checked;
     if (padrao) advogados.forEach((a) => { a.padrao = false; }); // "padrão" é exclusivo
-    advogados.push({ nome, numero, areas, padrao, ativo });
+    advogados.push({ nome, numero, telegram_chat_id, areas, padrao, ativo });
     // Limpa o formulário de criar.
     document.getElementById('adv-nome').value = '';
     document.getElementById('adv-numero').value = '';
+    document.getElementById('adv-telegram').value = '';
     document.getElementById('adv-areas').value = '';
     document.getElementById('adv-padrao').checked = false;
     document.getElementById('adv-ativo').checked = true;
@@ -520,7 +613,7 @@ Localização: Londrina, PR
     try {
       const r = await fetch('/api/advogados');
       const d = await r.json();
-      advogados = (d.advogados || []).map((a) => ({ nome: a.nome||'', numero: a.numero||'', areas: a.areas||[], padrao: !!a.padrao, ativo: a.ativo !== false }));
+      advogados = (d.advogados || []).map((a) => ({ nome: a.nome||'', numero: a.numero||'', telegram_chat_id: a.telegram_chat_id||'', areas: a.areas||[], padrao: !!a.padrao, ativo: a.ativo !== false }));
       renderAdvs();
     } catch (e) { setStatusAdv('Erro ao carregar: ' + e.message, false); }
   }
@@ -846,6 +939,8 @@ Localização: Londrina, PR
 
   carregarApiKey();
   carregarGeminiKey();
+  carregarWaKey();
+  carregarTgKey();
   carregarEscritorio();
   carregarPersonalidade();
   carregarMensagens();
@@ -854,7 +949,9 @@ Localização: Londrina, PR
   carregarAtendimentos();
   carregarAvisos();
   atualizarStatus();
+  atualizarWhatsappStatus();
   setInterval(atualizarStatus, 2500); // verifica a conexao a cada 2,5s
+  setInterval(atualizarWhatsappStatus, 20000); // ping ao token do WhatsApp a cada 20s
   setInterval(carregarAvisos, 5000); // atualiza o contador de avisos
 </script>
 </body>
@@ -894,9 +991,59 @@ function iniciarPainel(porta = 3000) {
       return res.end(HTML);
     }
 
+    // Verificacao inicial do webhook (Meta chama com hub.challenge).
+    if (req.method === 'GET' && req.url.startsWith('/webhook')) {
+      const query = new URL(req.url, 'http://localhost').searchParams;
+      const challenge = whatsapp.verificarWebhook(query);
+      if (challenge === null) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Verificacao falhou');
+      }
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end(challenge);
+    }
+
+    // Recebimento de mensagens do WhatsApp oficial (webhook POST).
+    if (req.method === 'POST' && req.url.startsWith('/webhook')) {
+      let raw = '';
+      req.on('data', (c) => {
+        raw += c;
+        if (raw.length > 5e6) req.destroy(); // guarda de 5MB
+      });
+      req.on('end', () => {
+        // Valida a assinatura antes de processar (garante que veio da Meta).
+        if (!whatsapp.validarAssinatura(raw, req.headers['x-hub-signature-256'])) {
+          console.warn('[WEBHOOK] Assinatura invalida — POST recusado.');
+          res.writeHead(403);
+          return res.end();
+        }
+        // Responde 200 na hora (a Meta reenvia se demorarmos) e processa depois.
+        res.writeHead(200);
+        res.end();
+        try {
+          for (const m of whatsapp.parseWebhook(raw)) {
+            if (jaVisto(m.id)) continue; // deduplica reentregas
+            if (webhookHandler) {
+              Promise.resolve().then(() => webhookHandler(m))
+                .catch((e) => console.error('[WEBHOOK] erro no handler:', e.message));
+            }
+          }
+        } catch (e) {
+          console.error('[WEBHOOK] erro ao processar:', e.message);
+        }
+      });
+      return;
+    }
+
     // Status da conexao do WhatsApp (consultado em loop pela pagina).
     if (req.method === 'GET' && req.url === '/api/status') {
-      return enviarJson(res, 200, { status: estado.status, qr: estado.qrDataUrl });
+      return enviarJson(res, 200, { status: estado.status });
+    }
+
+    // Ping ao token do WhatsApp oficial (numero verificado / motivo da falha).
+    if (req.method === 'GET' && req.url === '/api/whatsapp-status') {
+      return whatsapp.statusConexao().then((s) => enviarJson(res, 200, s))
+        .catch((e) => enviarJson(res, 200, { ok: false, motivo: 'erro_rede', erro: e.message }));
     }
 
     // Estado da chave da API (nunca devolve a chave inteira, so mascara).
@@ -917,6 +1064,30 @@ function iniciarPainel(porta = 3000) {
     // Salvar a chave do Google/Gemini. Aplica na hora, sem reiniciar o bot.
     if (req.method === 'POST' && req.url === '/api/apikey-gemini') {
       return lerCorpo(req, res, (corpo) => apikey.salvarChaveGemini(corpo.chave));
+    }
+
+    // Estado do WhatsApp oficial (token mascarado + ID do numero).
+    if (req.method === 'GET' && req.url === '/api/apikey-whatsapp') {
+      return enviarJson(res, 200, apikey.statusWhatsapp());
+    }
+
+    // Salvar o token e/ou o ID do numero do WhatsApp oficial. Aplica na hora.
+    if (req.method === 'POST' && req.url === '/api/apikey-whatsapp') {
+      return lerCorpo(req, res, (corpo) => {
+        if (corpo.token != null && String(corpo.token).trim()) apikey.salvarChaveWhatsapp(corpo.token);
+        if (corpo.phoneId != null && String(corpo.phoneId).trim()) apikey.salvarPhoneIdWhatsapp(corpo.phoneId);
+        return apikey.statusWhatsapp();
+      });
+    }
+
+    // Estado do token do Telegram (aviso ao advogado).
+    if (req.method === 'GET' && req.url === '/api/apikey-telegram') {
+      return enviarJson(res, 200, apikey.statusTelegram());
+    }
+
+    // Salvar o token do Telegram. Aplica na hora, sem reiniciar o bot.
+    if (req.method === 'POST' && req.url === '/api/apikey-telegram') {
+      return lerCorpo(req, res, (corpo) => apikey.salvarChaveTelegram(corpo.token));
     }
 
     // Ler a whitelist.
@@ -1073,19 +1244,6 @@ function iniciarPainel(porta = 3000) {
       });
     }
 
-    // Trocar de WhatsApp: desconecta, apaga a sessao e gera um novo QR code.
-    if (req.method === 'POST' && req.url === '/api/trocar') {
-      if (!trocarHandler) {
-        return enviarJson(res, 503, { erro: 'Troca de WhatsApp indisponível no momento.' });
-      }
-      // Dispara a troca em segundo plano e responde na hora; o painel acompanha
-      // o resultado pelo status (que passa a "carregando" e depois a "qr").
-      Promise.resolve()
-        .then(() => trocarHandler())
-        .catch((e) => console.error('Erro ao trocar de WhatsApp:', e.message));
-      return enviarJson(res, 200, { ok: true });
-    }
-
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Nao encontrado');
   });
@@ -1107,4 +1265,4 @@ function iniciarPainel(porta = 3000) {
   return server;
 }
 
-module.exports = { iniciarPainel, setStatus, setQR, setTrocarHandler };
+module.exports = { iniciarPainel, setStatus, setWebhookHandler };

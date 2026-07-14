@@ -3,6 +3,7 @@
     {
       "nome": "Equipe (exemplo - edite pelo painel)",
       "numero": "5500000000000",
+      "telegram_chat_id": "123456789",
       "areas": ["trabalhista", "familia"],
       "padrao": true,
       "ativo": true
