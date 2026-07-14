@@ -12,8 +12,15 @@ OpenAI) para gerar as respostas, a **API Google Gemini** (opcional) para transcr
 áudios e descrever imagens, e **SQLite** para persistência.
 
 - Roda **no Windows**, na máquina do escritório, iniciado por `iniciar.bat` (na raiz).
-- Stack: Node.js (CommonJS), `whatsapp-web.js` (Puppeteer/Chromium headless), `openai`,
-  `better-sqlite3` (síncrono), servidor HTTP nativo para o painel.
+- Stack: Node.js (CommonJS), **WhatsApp Cloud API oficial da Meta** (webhook HTTP + Graph
+  API, via `fetch` nativo — não há mais `whatsapp-web.js`/Puppeteer), `openai`,
+  `better-sqlite3` (síncrono), servidor HTTP nativo para o painel. O aviso ao advogado
+  sai pelo **Telegram** (Bot API).
+- ⚠️ **Migração recente do WhatsApp:** o transporte saiu do `whatsapp-web.js` (não-oficial,
+  causava bloqueio de número) para a **Cloud API oficial**. Mensagens chegam por **webhook**
+  (rota `/webhook` no painel) e são enviadas por HTTP. Detalhes e status em
+  [plano-migracao.md](plano-migracao.md). A camada de transporte fica em
+  [whatsapp.js](sistema/whatsapp.js); o núcleo de triagem (DeepSeek) não mudou.
 - Todo o código, comentários e mensagens ao usuário estão **em português**. Mantenha esse
   padrão ao editar.
 
@@ -35,50 +42,60 @@ OpenAI) para gerar as respostas, a **API Google Gemini** (opcional) para transcr
 ```
 iniciar.bat            # entrada no Windows: auto-update (git pull) + deps + start
 sistema/
-  index.js             # boot: initDb, sobe painel, cria cliente WhatsApp, eventos/QR
+  index.js             # boot: initDb, sobe painel, liga o webhook ao handleMessage
   bot.js               # NÚCLEO: handler de msg, debounce, contexto, chamada DeepSeek
+  whatsapp.js          # transporte da Cloud API oficial: enviar, baixar mídia, parseWebhook, assinatura
+  telegram.js          # aviso ao advogado via Telegram (Bot API)
   prompt.js            # monta o system prompt (personalidade editável + regras JSON)
   db.js                # SQLite (better-sqlite3): instituicoes, clientes, historico
   context.js           # arquivos .md de instituição e de cliente (perfil durável)
   escritorio.js        # lê/salva o .md da instituição em campos (áreas + descrição)
-  advogados.js         # roteamento de escalonamento por área (advogados.json)
+  advogados.js         # roteamento de escalonamento por área (advogados.json; campo telegram_chat_id)
   whitelist.js         # controle de quem é respondido (whitelist.json)
   mensagens.js         # textos de encaminhamento editáveis (mensagens.json + defaults)
   avisos.js            # buffer em memória de erros/avisos amigáveis (mostrados no painel)
   datajud.js           # consulta de andamento processual (DataJud/CNJ) via HTTP
   crm.js               # API pública do escritório: resolve CPF/nome → nº(s) CNJ
   midia.js             # transcreve áudio / descreve imagem via Gemini (fetch nativo)
-  apikey.js            # grava/aplica as chaves DeepSeek e Gemini no .env (painel)
-  painel.js            # servidor HTTP: SPA com navegação lateral + endpoints JSON
+  apikey.js            # grava/aplica chaves DeepSeek/Gemini e tokens WhatsApp/Telegram no .env
+  painel.js            # servidor HTTP: SPA + endpoints JSON + rota /webhook (recebe do WhatsApp)
   logger.js            # espelha console.* em log.txt (com rotação) + erros não tratados
   prompt/context .md   # instituicoes/*.md e clientes/*.md (contexto injetado no prompt)
   db/bot.db            # banco em runtime (ignorado no git)
 ```
 
 `iniciar.bat` tem um **guard de instância única**: se a porta 3000 já estiver em uso por
-um `node.exe`, encerra a instância anterior (`taskkill /F /T`, mata node + Chrome filho),
-apaga as travas `Singleton*` da sessão e sobe de novo. Abre o navegador só quando o painel
-responde de fato (evita F5 em PCs lentos).
+um `node.exe`, encerra a instância anterior (`taskkill /F /T`) e sobe de novo. Abre o
+navegador só quando o painel responde de fato (evita F5 em PCs lentos). Também **confere se
+o `cloudflared` está instalado** (túnel do webhook) e avisa se faltar — o webhook oficial
+só recebe mensagens com o túnel ativo (recomendado instalar o cloudflared como **serviço**
+do Windows). Não há mais download de Chrome/Puppeteer nem travas `Singleton*`.
 
 ## Fluxo de uma mensagem (bot.js)
 
-1. `client.on('message_create')` → `handleMessage` ([bot.js:156](sistema/bot.js#L156)).
-   Filtra: ignora self, grupos (`@g.us`), status; aceita `@c.us` e `@lid`.
-2. Resolve o **número real** e o nome (`@lid` não traz telefone → usa
-   `contact.id.user`/`contact.number`, 12–13 dígitos).
+1. A Meta faz **POST em `/webhook`** ([painel.js](sistema/painel.js)); o painel valida a
+   assinatura (`X-Hub-Signature-256` via `WHATSAPP_APP_SECRET`), responde **200 na hora**,
+   deduplica por `message.id` e chama o handler registrado pelo `index.js`, que invoca
+   `handleMessage`. [whatsapp.js](sistema/whatsapp.js) `parseWebhook` converte o payload em
+   objetos "mensagem" com a **mesma interface** que o bot já usava (`from`, `type`, `body`,
+   `getContact`, `reply`, `downloadMedia`) — por isso o `bot.js` quase não mudou.
+2. O **número real** e o nome já vêm no payload da Cloud API (não há mais o problema de
+   `@lid` do whatsapp-web.js); a whitelist tolera o "9" do celular como antes.
 3. **Whitelist** ([whitelist.js](sistema/whitelist.js)): **sempre ativa** — só responde
    números da lista (tolera o "9" inicial do celular). Lista vazia = não responde ninguém.
 3b. **Pausa por cliente**: se o cliente está com `pausado = 1` (coluna na tabela
    `clientes`), o bot fica em **silêncio total** — não responde, não trata mídia, não
    enfileira nem registra. Serve para o advogado assumir o atendimento humano. Checado em
    `handleMessage` via `db.getClienteByNumero` logo após a whitelist.
-4. **Mídia**: com `GEMINI_API_KEY` configurada, áudio (`ptt`/`audio`) é **transcrito** e
-   imagem **descrita** ([midia.js](sistema/midia.js)); o texto rotulado ("[Áudio enviado
-   pelo cliente — transcrição automática]...") entra no fluxo normal via
+4. **Mídia**: com `GEMINI_API_KEY` configurada, áudio é **transcrito** e imagem **descrita**
+   ([midia.js](sistema/midia.js)); o binário é baixado pelo `media_id` via
+   `whatsapp.baixarMidia` (a Cloud API não manda o binário no webhook). O texto rotulado
+   ("[Áudio enviado pelo cliente — transcrição automática]...") entra no fluxo normal via
    `enfileirarMensagem` — a DeepSeek segue fazendo a triagem. Sem chave, ou para
    vídeo/documento, ou em falha/arquivo grande (`MIDIA_MAX_MB`), cai no comportamento
-   antigo (`tratarMidia`): avisa o cliente e alerta o número padrão, com cooldown por
-   número (`MIDIA_COOLDOWN_MS`).
+   antigo (`tratarMidia`): avisa o cliente e **alerta o advogado padrão por Telegram**, com
+   cooldown por número (`MIDIA_COOLDOWN_MS`). (No WhatsApp oficial a nota de voz chega como
+   tipo `audio`, não `ptt`.)
 5. **Debounce** (`DEBOUNCE_MS`, ~5s): mensagens em sequência são agrupadas num único
    atendimento (`enfileirarMensagem`/`pendentes`) e viram uma só resposta.
 6. `processarMensagens`: monta o array `[system, ...histórico, user]`, chama
@@ -91,10 +108,14 @@ responde de fato (evita F5 em PCs lentos).
    DataJud** — a base do escritório serve só para achar o número, não como fonte do
    andamento (a rotina de atualização de lá já deu problema).
 7. Se `escalar: true` → escolhe advogado por área ([advogados.js](sistema/advogados.js)),
-   responde ao cliente e **avisa o advogado** por WhatsApp com o resumo da triagem — ambas
-   as mensagens vêm de templates editáveis ([mensagens.js](sistema/mensagens.js), com
-   placeholders `{nome}`, `{area}`, `{motivo}` etc.). Em seguida **pausa automaticamente**
-   o cliente (`db.setPausado(id, 1)`) para o advogado assumir.
+   responde ao cliente e **avisa o advogado por Telegram** ([telegram.js](sistema/telegram.js))
+   com o resumo da triagem. O aviso vai pelo Telegram (e não pelo WhatsApp) porque, na Cloud
+   API oficial, mensagem **iniciada pelo negócio** para quem não abriu janela de 24h exigiria
+   um template aprovado pela Meta — o Telegram é grátis, instantâneo e sem aprovação. O
+   destino é o `telegram_chat_id` do advogado (ou o `TELEGRAM_CHAT_ID_PADRAO`). As duas
+   mensagens vêm de templates editáveis ([mensagens.js](sistema/mensagens.js), placeholders
+   `{nome}`, `{area}`, `{motivo}` etc.). Em seguida **pausa automaticamente** o cliente
+   (`db.setPausado(id, 1)`) para o advogado assumir.
 8. Salva histórico e atualiza o `.md` do cliente.
 
 Erros relevantes para o usuário são registrados em [avisos.js](sistema/avisos.js) (falha/
@@ -139,6 +160,15 @@ remove ```` ``` ````, extrai o primeiro `{...}`. **Não use `response_format: js
 
 ## Configuração (`sistema/.env`, ver `.env.example`)
 
+- **WhatsApp oficial (Cloud API):** `WHATSAPP_TOKEN` (token permanente de *Usuário do
+  sistema* — não o de 24h), `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN` (verificação
+  do webhook), `WHATSAPP_APP_SECRET` (valida a assinatura do webhook; sem ele o webhook
+  funciona mas não valida — aviso no boot), `GRAPH_API_VERSION` (padrão `v21.0`). O token e o
+  ID do número também são graváveis pelo painel ([apikey.js](sistema/apikey.js), aba "Chave
+  da API"). Sem token/ID o bot sobe, mas não recebe nem responde.
+- **Telegram (aviso ao advogado):** `TELEGRAM_BOT_TOKEN` (bot criado no `@BotFather`; também
+  gravável pelo painel) e `TELEGRAM_CHAT_ID_PADRAO` (opcional — destino quando o advogado não
+  tem `telegram_chat_id` próprio em `advogados.json`).
 - `DEEPSEEK_API_KEY` — chave da API (também gravável pelo painel via
   [apikey.js](sistema/apikey.js); o bot sobe sem ela e falha só nas respostas).
 - `DEEPSEEK_MODEL` (padrão `deepseek-v4-flash`), `INSTITUICAO_PADRAO_ID` (1).
@@ -165,13 +195,15 @@ Servidor HTTP nativo (sem framework) que serve uma SPA embutida (HTML/CSS/JS num
 template string) com **navegação lateral** (sidebar): uma seção visível por vez, botão por
 área. Cada card tem um ícone de ajuda ⓘ com tooltip. Seções:
 
-- **Conexão** — status + QR code + "trocar de WhatsApp" (apaga sessão e gera novo QR). O
-  botão na sidebar tem um "dot" que reflete o status.
+- **Conexão** — status da API oficial (não há mais QR code nem "trocar de WhatsApp"): mostra
+  se há token+ID configurados e um "ping" ao token (`/api/whatsapp-status`) com o número
+  verificado ou o motivo da falha. O botão na sidebar tem um "dot" que reflete o status.
 - **Avisos** — lista os erros/avisos amigáveis ([avisos.js](sistema/avisos.js)); badge com
   contador. Poll a cada 5s.
-- **Chave da API** — grava/aplica a chave DeepSeek e a chave do Google/Gemini para
-  áudio/imagem ([apikey.js](sistema/apikey.js)); a do Google é opcional (banner amarelo
-  quando ausente, não vermelho).
+- **Chave da API** — grava/aplica a chave DeepSeek, a chave do Google/Gemini (áudio/imagem),
+  o **token + ID do número do WhatsApp oficial** e o **token do Telegram**
+  ([apikey.js](sistema/apikey.js)); Gemini e Telegram são opcionais (banner amarelo quando
+  ausentes, não vermelho).
 - **Escritório** — edita o `.md` da instituição em **dois campos**
   ([escritorio.js](sistema/escritorio.js)): as **áreas atendidas** (viram a linha
   `Especialidades (áreas que o escritório atende): ...` — é dela que o bot conclui se
@@ -190,7 +222,9 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
 - **Personalidade** — `personalidade.txt` (tom/estilo do bot).
 - **Mensagens de encaminhamento** — os dois templates de [mensagens.js](sistema/mensagens.js).
 - **Advogados** — formulário de criar no topo + lista editável abaixo; **salva
-  automaticamente** a cada mudança (não há botão "Salvar").
+  automaticamente** a cada mudança (não há botão "Salvar"). Cada advogado tem um campo
+  **Chat do Telegram** (`telegram_chat_id`) — é por onde o aviso de escalonamento chega; o
+  número do WhatsApp virou opcional (basta ter chat do Telegram ou número).
 
 Tudo é editável sem reiniciar o bot (os arquivos são lidos a cada uso). Em `EADDRINUSE`
 (porta já em uso) o painel encerra com mensagem clara.

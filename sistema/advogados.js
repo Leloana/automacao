@@ -22,7 +22,8 @@ function getAdvogados() {
     const dados = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     // Aceita tanto { "advogados": [...] } quanto um array direto [...].
     const lista = Array.isArray(dados) ? dados : dados.advogados;
-    return Array.isArray(lista) ? lista.filter((a) => a && a.numero) : [];
+    // Mantem quem tem numero OU chat do Telegram (o aviso vai pelo Telegram).
+    return Array.isArray(lista) ? lista.filter((a) => a && (a.numero || a.telegram_chat_id)) : [];
   } catch (err) {
     console.error('Erro ao ler advogados.json:', err.message);
     return [];
@@ -78,6 +79,9 @@ function salvarAdvogados(lista) {
     .map((a) => ({
       nome: String((a && a.nome) || '').trim(),
       numero: String((a && a.numero) || '').replace(/\D/g, ''),
+      // Chat do Telegram (id numerico ou @usuario) para onde o aviso e enviado.
+      // Aceita numero negativo (grupos) e o prefixo @; guarda como string.
+      telegram_chat_id: String((a && a.telegram_chat_id) || '').trim(),
       // areas pode vir como array ou string separada por virgulas.
       areas: (Array.isArray(a && a.areas)
         ? a.areas
@@ -87,7 +91,7 @@ function salvarAdvogados(lista) {
       padrao: !!(a && a.padrao),
       ativo: !(a && a.ativo === false),
     }))
-    .filter((a) => a.numero); // descarta registros sem numero
+    .filter((a) => a.numero || a.telegram_chat_id); // precisa de ao menos um destino
 
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({ advogados: normalizada }, null, 2) + '\n', 'utf8');
   return normalizada;
