@@ -66,8 +66,12 @@ responde de fato (evita F5 em PCs lentos).
    Filtra: ignora self, grupos (`@g.us`), status; aceita `@c.us` e `@lid`.
 2. Resolve o **número real** e o nome (`@lid` não traz telefone → usa
    `contact.id.user`/`contact.number`, 12–13 dígitos).
-3. **Whitelist** ([whitelist.js](sistema/whitelist.js)): **sempre ativa** — só responde
+3. **Whitelist** ([whitelist.js](sistema/whitelist.js)): **ativa por padrão** — só responde
    números da lista (tolera o "9" inicial do celular). Lista vazia = não responde ninguém.
+   Exceção: o flag **`liberarTodos`** em `whitelist.json` (ligado pela aba "Responder todo
+   mundo" do painel) **desliga a whitelist** e faz o bot responder **qualquer número**;
+   `numeroPermitido` retorna `true` para todos. Uso perigoso — a aba trava o acionamento
+   atrás de vários avisos + dupla confirmação (ver painel).
 3b. **Pausa por cliente**: se o cliente está com `pausado = 1` (coluna na tabela
    `clientes`), o bot fica em **silêncio total** — não responde, não trata mídia, não
    enfileira nem registra. Serve para o advogado assumir o atendimento humano. Checado em
@@ -191,6 +195,12 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
 - **Mensagens de encaminhamento** — os dois templates de [mensagens.js](sistema/mensagens.js).
 - **Advogados** — formulário de criar no topo + lista editável abaixo; **salva
   automaticamente** a cada mudança (não há botão "Salvar").
+- **Responder todo mundo** — aba própria, separada por um divisor no rodapé da sidebar
+  (item em vermelho, com "dot" pulsante quando ligado). Liga/desliga o flag `liberarTodos`
+  ([whitelist.js](sistema/whitelist.js)) via `/api/liberar`. **Perigosa**: para *ligar* exige
+  marcar a caixa de ciência (destrava o botão) + `confirm()` + digitar `LIBERAR`; ao ligar,
+  registra um aviso ([avisos.js](sistema/avisos.js)). Para *desligar* (voltar a responder só
+  a lista) é um clique só. Estado exibido em banner.
 
 Tudo é editável sem reiniciar o bot (os arquivos são lidos a cada uso). Em `EADDRINUSE`
 (porta já em uso) o painel encerra com mensagem clara.

@@ -1,6 +1,9 @@
 // whitelist.js
 // Controla quais numeros sao respondidos automaticamente pelo bot.
-// A whitelist esta SEMPRE ativa: o bot responde apenas os numeros da lista.
+// Por padrao a whitelist esta SEMPRE ativa: o bot responde apenas os numeros
+// da lista. Existe uma excecao PERIGOSA: o modo "liberarTodos" (responder todo
+// mundo), que desliga a whitelist e faz o bot responder QUALQUER numero. Esse
+// modo so deve ser ligado de proposito pelo painel (com varios avisos).
 // A configuracao fica em whitelist.json (gerenciavel pelo painel web).
 
 const fs = require('fs');
@@ -21,18 +24,21 @@ function soDigitos(s) {
 function lerConfig() {
   try {
     if (!fs.existsSync(CONFIG_PATH)) {
-      return { habilitada: true, numeros: [] };
+      return { habilitada: true, liberarTodos: false, numeros: [] };
     }
     const dados = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     return {
-      habilitada: true, // whitelist sempre ativa
+      habilitada: true, // whitelist sempre ativa (salvo liberarTodos)
+      // Modo "responder todo mundo": quando true, a whitelist e IGNORADA e o
+      // bot responde QUALQUER numero. So fica true se ligado de proposito.
+      liberarTodos: dados.liberarTodos === true,
       numeros: Array.isArray(dados.numeros)
         ? dados.numeros.map(soDigitos).filter(Boolean)
         : [],
     };
   } catch (e) {
     console.error('Erro ao ler whitelist.json:', e.message);
-    return { habilitada: true, numeros: [] };
+    return { habilitada: true, liberarTodos: false, numeros: [] };
   }
 }
 
@@ -40,7 +46,8 @@ function lerConfig() {
  * Grava a configuracao (usado pelo painel). Normaliza os numeros e remove
  * duplicados. Retorna o objeto efetivamente salvo.
  */
-function salvarConfig({ numeros }) {
+function salvarConfig({ numeros, liberarTodos } = {}) {
+  const atual = lerConfig();
   const limpos = Array.isArray(numeros)
     ? [...new Set(
         numeros
@@ -48,10 +55,25 @@ function salvarConfig({ numeros }) {
           // Numero brasileiro: pais(55) + DDD(2) + numero(8 ou 9) = 12 ou 13 digitos.
           .filter((n) => n.length >= 12 && n.length <= 13)
       )]
-    : [];
-  const conteudo = { habilitada: true, numeros: limpos };
+    // Sem 'numeros' no payload: preserva a lista atual (ex.: ao so alternar o
+    // modo "responder todo mundo", nao se mexe nos numeros cadastrados).
+    : atual.numeros;
+  const conteudo = {
+    habilitada: true,
+    // Preserva o flag atual quando 'liberarTodos' nao vem no payload.
+    liberarTodos: liberarTodos === undefined ? atual.liberarTodos : liberarTodos === true,
+    numeros: limpos,
+  };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(conteudo, null, 2), 'utf8');
   return conteudo;
+}
+
+/**
+ * Liga/desliga o modo "responder todo mundo" (desativa/reativa a whitelist),
+ * sem mexer nos numeros cadastrados. Retorna a config efetivamente salva.
+ */
+function setLiberarTodos(valor) {
+  return salvarConfig({ liberarTodos: valor === true });
 }
 
 /**
@@ -72,13 +94,15 @@ function variantes(n) {
 
 /**
  * Indica se um numero pode ser respondido automaticamente.
- * A whitelist esta sempre ativa: responde apenas os numeros da lista
- * (tolerando o "9" inicial do celular).
+ * Por padrao a whitelist esta ativa: responde apenas os numeros da lista
+ * (tolerando o "9" inicial do celular). Se o modo "responder todo mundo"
+ * (liberarTodos) estiver ligado, responde QUALQUER numero.
  */
 function numeroPermitido(numero) {
   const cfg = lerConfig();
+  if (cfg.liberarTodos) return true; // modo "responder todo mundo" ligado
   const vars = variantes(soDigitos(numero));
   return vars.some((v) => cfg.numeros.includes(v));
 }
 
-module.exports = { numeroPermitido, lerConfig, salvarConfig, soDigitos, variantes };
+module.exports = { numeroPermitido, lerConfig, salvarConfig, setLiberarTodos, soDigitos, variantes };

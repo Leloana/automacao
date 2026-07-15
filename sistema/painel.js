@@ -6,7 +6,7 @@
 
 const http = require('http');
 const qrcode = require('qrcode');
-const { lerConfig, salvarConfig, soDigitos, variantes } = require('./whitelist');
+const { lerConfig, salvarConfig, setLiberarTodos, soDigitos, variantes } = require('./whitelist');
 const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require('./prompt');
 const { getMensagens, salvarMensagens, MSG_CLIENTE_PADRAO, MSG_ADVOGADO_PADRAO } = require('./mensagens');
 const { getAdvogados, salvarAdvogados } = require('./advogados');
@@ -115,6 +115,24 @@ const HTML = `<!DOCTYPE html>
   .nav-badge { background: #ef4444; color: #fff; font-size: 11px; font-weight: 700; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
   .aviso-erro { border-left: 3px solid #ef4444; }
   .aviso-aviso { border-left: 3px solid #f59e0b; }
+  .nav-sep { height: 1px; background: #1f2b45; margin: 12px 6px; }
+  .nav-perigo { color: #f87171; }
+  .nav-perigo:hover { background: #2a1414; }
+  .nav-perigo.active { background: #b91c1c; color: #fff; }
+  .nav-perigo .nav-dot { background: #ef4444; box-shadow: 0 0 0 0 rgba(239,68,68,.7); animation: pulseDot 1.4s infinite; }
+  @keyframes pulseDot { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,.7); } 70% { box-shadow: 0 0 0 7px rgba(239,68,68,0); } 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } }
+  /* Secao "Responder todo mundo" (perigosa). */
+  .perigo-box { border: 1px solid #7f1d1d; background: #1a0e0e; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .perigo-box ul.avisos-lista { list-style: none; padding: 0; margin: 0; }
+  .perigo-box ul.avisos-lista li { display: block; background: transparent; padding: 8px 0; margin: 0; border-bottom: 1px solid #3f1d1d; font-size: 14px; line-height: 1.5; letter-spacing: normal; color: #fecaca; }
+  .perigo-box ul.avisos-lista li:last-child { border-bottom: none; }
+  .btn-liberar { background: #dc2626; color: #fff; width: 100%; padding: 13px; font-size: 15px; }
+  .btn-liberar:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-voltar-lista { background: #22c55e; color: #06210f; width: 100%; padding: 13px; font-size: 15px; }
+  .ack { display: flex; align-items: flex-start; gap: 10px; background: #0f172a; padding: 12px 14px; border-radius: 8px; margin: 14px 0; cursor: pointer; }
+  .ack input { width: 18px; height: 18px; margin-top: 1px; flex: none; }
+  .ack span { font-size: 14px; line-height: 1.4; }
+  .b-liberado { background: #450a0a; color: #fca5a5; border: 1px solid #7f1d1d; } .b-liberado .dot { background: #ef4444; }
   .content { flex: 1; min-width: 0; padding: 24px; }
   .card.hidden { display: none; }
   @media (max-width: 760px) {
@@ -140,6 +158,8 @@ const HTML = `<!DOCTYPE html>
       <button class="nav-btn" data-target="sec-personalidade"><span class="ic">🎭</span><span class="lbl">Personalidade</span></button>
       <button class="nav-btn" data-target="sec-mensagens"><span class="ic">✉️</span><span class="lbl">Mensagens de encaminhamento</span></button>
       <button class="nav-btn" data-target="sec-advogados"><span class="ic">⚖️</span><span class="lbl">Advogados</span></button>
+      <div class="nav-sep"></div>
+      <button class="nav-btn nav-perigo" data-target="sec-liberar"><span class="ic">🚨</span><span class="lbl">Responder todo mundo</span><span class="nav-dot" id="nav-dot-liberar" style="display:none"></span></button>
     </nav>
     <main class="content">
   <!-- Avisos e problemas (erros amigaveis) -->
@@ -323,6 +343,42 @@ Localização: Londrina, PR
     <button class="btn-reset" onclick="removerAutorizacao()">Remover autorização deste cliente</button>
     <div class="status" id="status-cli"></div>
     <p class="sub" style="margin-top:16px">Dica: o que estiver abaixo de <code>## Anotações do escritório</code> nunca é alterado pelo bot — bom lugar para suas notas. "Remover autorização" faz o bot parar de responder este número (o histórico é mantido).</p>
+  </div>
+
+  <!-- Responder todo mundo (desliga a whitelist) — SECAO PERIGOSA -->
+  <div class="card hidden" id="sec-liberar">
+    <h2>Responder todo mundo<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Desliga a lista de autorização. Com isso o bot responde QUALQUER número que mandar mensagem, e não só os clientes cadastrados. Use com muito cuidado — o normal é deixar DESLIGADO.</span></span></h2>
+    <p class="sub">Normalmente o bot só responde os números que você cadastrou. Aqui você pode <b>desligar essa proteção</b> e fazer o bot responder <b>qualquer pessoa</b> que mandar mensagem.</p>
+
+    <div id="liberar-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="liberar-estado-txt">Verificando...</span></div>
+
+    <!-- Quando DESLIGADO: avisos + travamento por confirmacao -->
+    <div id="liberar-off">
+      <div class="perigo-box">
+        <div style="font-weight:700;color:#fca5a5;margin-bottom:8px">⚠️ Leia antes de ligar. Ao ligar, o bot passa a:</div>
+        <ul class="avisos-lista">
+          <li>📢 <b>Responder QUALQUER número</b> que mandar mensagem — inclusive desconhecidos, spam, propaganda e trotes.</li>
+          <li>🔓 <b>Ignorar a lista de clientes autorizados</b> — a aba "Criar cliente" deixa de ter efeito enquanto isso estiver ligado.</li>
+          <li>💸 <b>Gastar créditos da API</b> (DeepSeek/Google) com cada mensagem recebida, de qualquer pessoa. Isso pode custar dinheiro rápido.</li>
+          <li>🤖 <b>Atender e triar automaticamente</b> pessoas que não são clientes, podendo passar informações e até encaminhar para advogados.</li>
+          <li>🔒 <b>Riscos de privacidade/LGPD</b>: o bot conversará com pessoas com quem o escritório não tem relação.</li>
+        </ul>
+      </div>
+      <p class="sub">O uso recomendado é <b>deixar isto desligado</b> e autorizar cliente por cliente na aba "Criar cliente". Só ligue se você tem certeza absoluta do que está fazendo.</p>
+      <label class="ack"><input type="checkbox" id="liberar-ack" onchange="atualizarBotaoLiberar()" /><span>Eu entendi que o bot vai <b>responder todo mundo</b>, ignorando a lista de clientes, e que isso pode gastar créditos e ter riscos de privacidade.</span></label>
+      <button class="btn-liberar" id="btn-liberar" disabled onclick="ligarLiberar()">Ligar "responder todo mundo"</button>
+    </div>
+
+    <!-- Quando LIGADO: alerta forte + botao facil para voltar ao normal -->
+    <div id="liberar-on" style="display:none">
+      <div class="perigo-box" style="border-color:#dc2626;background:#2a0e0e">
+        <div style="font-weight:700;color:#fecaca;font-size:15px;margin-bottom:6px">🚨 O bot está respondendo TODO MUNDO agora.</div>
+        <p class="sub" style="color:#fca5a5;margin:0">A lista de clientes autorizados está sendo <b>ignorada</b>. Qualquer número que mandar mensagem recebe resposta do bot e consome créditos. Volte ao modo normal assim que possível.</p>
+      </div>
+      <button class="btn-voltar-lista" onclick="desligarLiberar()">Desligar e voltar a responder só a lista de clientes</button>
+    </div>
+
+    <div class="status" id="status-liberar"></div>
   </div>
     </main>
   </div>
@@ -834,6 +890,71 @@ Localização: Londrina, PR
     } catch (e) { setStatusAvisos('Erro ao limpar: ' + e.message, false); }
   }
 
+  // ---- Responder todo mundo (desliga a whitelist) — SECAO PERIGOSA ----
+  function setStatusLiberar(msg, ok){
+    const s = document.getElementById('status-liberar');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  function atualizarBotaoLiberar(){
+    // O botao de ligar so destrava depois de marcar a caixa de ciencia.
+    const ack = document.getElementById('liberar-ack');
+    document.getElementById('btn-liberar').disabled = !ack.checked;
+  }
+  function renderLiberar(ligado){
+    const est = document.getElementById('liberar-estado');
+    const txt = document.getElementById('liberar-estado-txt');
+    const off = document.getElementById('liberar-off');
+    const on = document.getElementById('liberar-on');
+    const dot = document.getElementById('nav-dot-liberar');
+    if (ligado) {
+      est.className = 'banner b-liberado';
+      txt.textContent = '🚨 LIGADO — o bot está respondendo TODO MUNDO.';
+      off.style.display = 'none';
+      on.style.display = 'block';
+      if (dot) dot.style.display = 'inline-block';
+    } else {
+      est.className = 'banner b-conectado';
+      txt.textContent = 'Desligado — o bot só responde os clientes cadastrados (recomendado).';
+      off.style.display = 'block';
+      on.style.display = 'none';
+      // Reseta a trava para a proxima vez.
+      document.getElementById('liberar-ack').checked = false;
+      atualizarBotaoLiberar();
+      if (dot) dot.style.display = 'none';
+    }
+  }
+  async function carregarLiberar(){
+    try {
+      const r = await fetch('/api/liberar');
+      const d = await r.json();
+      renderLiberar(!!d.liberarTodos);
+    } catch (e) { /* ignora; tenta de novo depois */ }
+  }
+  async function ligarLiberar(){
+    // Camada extra de avisos: confirmacao dupla, sendo a ultima com digitacao.
+    if (!document.getElementById('liberar-ack').checked) return;
+    if (!confirm('ATENÇÃO: o bot vai responder QUALQUER número que mandar mensagem, ignorando a lista de clientes. Isso pode gastar créditos e conversar com desconhecidos.\\n\\nTem certeza que quer LIGAR isso?')) return;
+    const conf = prompt('Última confirmação. Para ligar o modo "responder todo mundo", digite LIBERAR (em maiúsculas) abaixo:');
+    if (conf === null) return; // cancelou
+    if (String(conf).trim().toUpperCase() !== 'LIBERAR') { setStatusLiberar('Cancelado: a palavra de confirmação não confere.', false); return; }
+    try {
+      const r = await fetch('/api/liberar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ liberarTodos: true }) });
+      const d = await r.json();
+      if (d.erro) return setStatusLiberar('Erro: ' + d.erro, false);
+      renderLiberar(!!d.liberarTodos);
+      setStatusLiberar('Modo "responder todo mundo" LIGADO. O bot agora responde qualquer número.', true);
+    } catch (e) { setStatusLiberar('Erro ao ligar: ' + e.message, false); }
+  }
+  async function desligarLiberar(){
+    try {
+      const r = await fetch('/api/liberar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ liberarTodos: false }) });
+      const d = await r.json();
+      if (d.erro) return setStatusLiberar('Erro: ' + d.erro, false);
+      renderLiberar(!!d.liberarTodos);
+      setStatusLiberar('Pronto! Voltou ao normal: o bot só responde os clientes cadastrados.', true);
+    } catch (e) { setStatusLiberar('Erro ao desligar: ' + e.message, false); }
+  }
+
   // ---- Navegacao lateral: mostra uma secao (card) por vez ----
   function mostrarSecao(id){
     document.querySelectorAll('.content > .card').forEach((s) => s.classList.toggle('hidden', s.id !== id));
@@ -853,9 +974,11 @@ Localização: Londrina, PR
   carregarClientes();
   carregarAtendimentos();
   carregarAvisos();
+  carregarLiberar();
   atualizarStatus();
   setInterval(atualizarStatus, 2500); // verifica a conexao a cada 2,5s
   setInterval(carregarAvisos, 5000); // atualiza o contador de avisos
+  setInterval(carregarLiberar, 8000); // reflete o modo "responder todo mundo" (dot na barra)
 </script>
 </body>
 </html>`;
@@ -927,6 +1050,27 @@ function iniciarPainel(porta = 3000) {
     // Salvar a whitelist.
     if (req.method === 'POST' && req.url === '/api/whitelist') {
       return lerCorpo(req, res, (corpo) => salvarConfig(corpo));
+    }
+
+    // Ler o estado do modo "responder todo mundo" (whitelist ligada/desligada).
+    if (req.method === 'GET' && req.url === '/api/liberar') {
+      return enviarJson(res, 200, { liberarTodos: lerConfig().liberarTodos });
+    }
+
+    // Ligar/desligar o modo "responder todo mundo". Ao ligar, o bot passa a
+    // responder QUALQUER numero (a whitelist e ignorada). Vale na hora.
+    if (req.method === 'POST' && req.url === '/api/liberar') {
+      return lerCorpo(req, res, (corpo) => {
+        const cfg = setLiberarTodos(corpo.liberarTodos === true);
+        // Ecoa no console/log e nos avisos, para ficar rastreavel.
+        if (cfg.liberarTodos) {
+          avisos.registrar('aviso', 'Modo "responder todo mundo" LIGADO',
+            'A whitelist foi desligada pelo painel: o bot está respondendo qualquer número. Desligue quando não precisar mais.');
+        } else {
+          console.log('Modo "responder todo mundo" desligado pelo painel.');
+        }
+        return { liberarTodos: cfg.liberarTodos };
+      });
     }
 
     // Cadastrar um cliente: autoriza o numero na whitelist E ja cria a ficha
