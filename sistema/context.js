@@ -170,9 +170,14 @@ function atualizarMdCliente(arquivoMd, perfil = {}) {
   const numero = perfil.numero || pegar(/^Telefone:[ \t]*(.*)$/m) || '';
   const apelido = pegar(/^Apelido:[ \t]*(.*)$/m);
 
+  // Os dois campos vivem em UMA linha cada no .md, e sao relidos pelos regexes
+  // de linha unica acima. Um valor com quebra de linha truncaria o texto na
+  // proxima releitura, entao achatamos antes de gravar.
+  const umaLinha = (texto) => (texto || '').replace(/\s*\r?\n\s*/g, ' ').trim();
+
   // Mantem o valor antigo quando o novo vier vazio (nao apaga dados ja escritos).
-  const areaInteresse = (perfil.areaInteresse || '').trim() || pegar(/^Área de interesse:[ \t]*(.*)$/m);
-  const observacoes = (perfil.observacoes || '').trim() || pegar(/^Observações:[ \t]*(.*)$/m);
+  const areaInteresse = umaLinha(perfil.areaInteresse) || pegar(/^Área de interesse:[ \t]*(.*)$/m);
+  const observacoes = umaLinha(perfil.observacoes) || pegar(/^Observações:[ \t]*(.*)$/m);
 
   // Preserva o que o escritorio escreveu: tudo apos a ULTIMA ocorrencia do
   // marcador. Usar lastIndexOf colapsa marcadores duplicados de arquivos que

@@ -11,6 +11,8 @@
 const path = require('path');
 const fs = require('fs');
 
+const { getTriagemParaPrompt } = require('./triagem');
+
 // Arquivo onde fica a personalidade editavel. Use {nomeInstituicao} no texto
 // que o sistema substitui pelo nome do escritorio em tempo de execucao.
 const PERSONALIDADE_PATH = path.join(__dirname, 'personalidade.txt');
@@ -88,6 +90,17 @@ function buildSystemPrompt({ nomeInstituicao, contextoInstituicao, contextoClien
   // Personalidade editavel: substitui o placeholder pelo nome do escritorio.
   const personalidade = getPersonalidade().replace(/\{nomeInstituicao\}/g, nomeInstituicao || '');
 
+  // Listas editaveis pelo painel (triagem.js). Cada bloco so entra se a lista
+  // tiver conteudo — assim o escritorio pode esvaziar uma delas sem deixar um
+  // "Priorize:" solto no prompt.
+  const triagem = getTriagemParaPrompt();
+  const blocoDescobrir = triagem.descobrir
+    ? `\n  Ao longo da conversa, procure levantar estes pontos (o escritório pediu):\n${triagem.descobrir}\n  Eles são PRIORIDADE, não obrigação: encaixe-os naturalmente na conversa, no ritmo do cliente. NUNCA os transforme em formulário nem em interrogatório, não faça mais de uma ou duas perguntas por vez e não segure o escalonamento para completar a lista — se o cliente pedir para falar com alguém, estiver impaciente ou o caso for urgente, escale na hora com o que você já tem, mesmo faltando tudo.`
+    : '';
+  const blocoAnotar = triagem.anotar
+    ? `\n        - O escritório quer ver estes pontos na ficha sempre que o cliente mencionar algum deles (não pergunte por eles só para preencher — aqui é só registro do que surgir):\n${triagem.anotar}\n        - A lista acima é o mínimo, não o limite: registre também qualquer outra coisa relevante que o cliente contar.`
+    : '';
+
   return `${personalidade}
 
 Contexto do escritório:
@@ -113,7 +126,7 @@ Regras de cada campo:
     • você já tiver feito a triagem e reunido o essencial do caso — aí entregue para o advogado dar seguimento;
     • for algo que realmente só um advogado resolve (assinar, peticionar, fechar contrato, opinar sobre o caso concreto) E a triagem já estiver razoável.
   Use false enquanto ainda estiver acolhendo, tirando dúvidas gerais ou coletando as informações da triagem.
-- Como fazer a triagem (no campo "resposta"): quando o assunto vai precisar de um advogado, antes de escalar entenda o caso com naturalidade — o que aconteceu, desde quando, o que a pessoa deseja e algum dado essencial (ex.: se foi demitida, há quanto tempo e como; se é pensão, se já há acordo). Faça no máximo uma ou duas perguntas por vez, leves e humanas, nunca como interrogatório. Se a pessoa estiver impaciente, evasiva ou claramente preferir falar com alguém, pare de perguntar e escale na hora. Vá registrando o que descobrir em "perfil.observacoes".
+- Como fazer a triagem (no campo "resposta"): quando o assunto vai precisar de um advogado, antes de escalar entenda o caso com naturalidade — o que aconteceu, desde quando, o que a pessoa deseja e algum dado essencial (ex.: se foi demitida, há quanto tempo e como; se é pensão, se já há acordo). Faça no máximo uma ou duas perguntas por vez, leves e humanas, nunca como interrogatório. Se a pessoa estiver impaciente, evasiva ou claramente preferir falar com alguém, pare de perguntar e escale na hora. Vá registrando o que descobrir em "perfil.observacoes".${blocoDescobrir}
 - "area": a área do direito do assunto. Escolha uma destas quando se aplicar: ${areas}. Se não se encaixar em nenhuma, use "geral".
 - "motivo": quando "escalar" for true, escreva o resumo da triagem em 1 a 3 frases — o que o cliente precisa e os fatos essenciais que você levantou — para o advogado já agir sem precisar perguntar tudo de novo. Quando for false, deixe "".
 - "consultar_processo": use para consultar o andamento de um processo judicial no DataJud (CNJ).
@@ -127,9 +140,14 @@ Regras de cada campo:
     - Se você já tem o número CNJ, use "consultar_processo" (NÃO "consultar_cliente"). Nunca preencha os dois ao mesmo tempo.
     - Se o sistema avisar que há mais de um cliente com o mesmo nome, NUNCA cite nomes de terceiros; peça o CPF para identificar com segurança.
     - Em todos os outros casos, deixe "consultar_cliente": null.
-- "perfil": um resumo do cliente para o escritório consultar depois, construído a partir de TODA a conversa (incluindo o "Contexto do cliente" acima, se houver).
-    - "area_interesse": em poucas palavras, o assunto/área jurídica que o cliente procura (ex.: "rescisão trabalhista", "pensão alimentícia", "consulta sobre processo"). Se ainda não der para saber, deixe "".
-    - "observacoes": a MEMÓRIA de longo prazo do caso. Só as mensagens mais recentes ficam visíveis para você; as antigas saem da conversa. Por isso, registre aqui os fatos essenciais para que nada importante se perca: o que aconteceu, desde quando (datas), o que o cliente deseja e os dados já levantados na triagem. Resumo corrido e factual, tipicamente de 2 a 5 frases curtas. Vá enriquecendo conforme a conversa avança e SEMPRE mantenha o que já era verdade (não apague fatos anteriores ao acrescentar novos). Use apenas o que o cliente disse — nunca invente dados. Se ainda não houver nada relevante, deixe "".
+- "perfil": a FICHA do cliente para o escritório consultar depois, construída a partir de TODA a conversa (incluindo o "Contexto do cliente" acima, se houver). Preencha em TODOS os turnos — é assim que o escritório enxerga o atendimento.
+    - "area_interesse": em poucas palavras, o assunto/área jurídica que o cliente procura (ex.: "rescisão trabalhista", "pensão alimentícia", "consulta sobre processo"). Assim que houver qualquer pista do assunto, já preencha, mesmo que provisório — você pode corrigir depois. Só deixe "" enquanto não houver pista nenhuma.
+    - "observacoes": a MEMÓRIA de longo prazo do cliente. Só as mensagens mais recentes ficam visíveis para você; as antigas somem da conversa, e o que não estiver aqui se perde para sempre.
+        - A régua é BAIXA: na dúvida, registre. Anote tudo que o cliente contar sobre si ou sobre o caso, mesmo que pareça pequeno ou ainda solto, inclusive o estado do atendimento (ex.: "primeiro contato; só se apresentou, ainda não disse o assunto").${blocoAnotar}
+        - Só deixe "" se o cliente literalmente não tiver dito nada além de um cumprimento — e, mesmo aí, prefira registrar que houve um primeiro contato.
+        - Este campo SUBSTITUI o anterior: reescreva sempre a ficha INTEIRA, repetindo o que já está no "Contexto do cliente" acima e acrescentando o que for novo. Um fato que você omitir some do registro.
+        - Texto corrido e factual, numa única linha (sem quebras de linha, listas ou marcadores). Pode crescer conforme a conversa avança — de uma até dez frases curtas, sem encurtar o que já existia.
+        - Use apenas o que o cliente disse — nunca invente nem deduza dados.
 
 Quando "escalar" for true, mantenha "resposta" curta e tranquilizadora, mostrando que já entendeu o caso (por exemplo: "Entendi sua situação, já vou te direcionar para nossa equipe, que vai cuidar disso, tá?") e NÃO inclua telefone nem instruções de contato no texto — o sistema cuida disso.`;
 }

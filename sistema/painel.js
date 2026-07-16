@@ -9,6 +9,7 @@ const qrcode = require('qrcode');
 const { lerConfig, salvarConfig, setLiberarTodos, soDigitos, variantes } = require('./whitelist');
 const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require('./prompt');
 const { getMensagens, salvarMensagens, MSG_CLIENTE_PADRAO, MSG_ADVOGADO_PADRAO } = require('./mensagens');
+const { getTriagem, salvarTriagem, ANOTAR_PADRAO, DESCOBRIR_PADRAO, MAX_DESCOBRIR } = require('./triagem');
 const { getAdvogados, salvarAdvogados } = require('./advogados');
 const { readMarkdown, escreverMarkdown, criarFichaCliente } = require('./context');
 const escritorio = require('./escritorio');
@@ -156,6 +157,7 @@ const HTML = `<!DOCTYPE html>
       <button class="nav-btn" data-target="sec-contexto"><span class="ic">👥</span><span class="lbl">Clientes</span></button>
       <button class="nav-btn" data-target="sec-atendimento"><span class="ic">⏯️</span><span class="lbl">Atendimento (pausar)</span></button>
       <button class="nav-btn" data-target="sec-personalidade"><span class="ic">🎭</span><span class="lbl">Personalidade</span></button>
+      <button class="nav-btn" data-target="sec-triagem"><span class="ic">📋</span><span class="lbl">O que anotar e perguntar</span></button>
       <button class="nav-btn" data-target="sec-mensagens"><span class="ic">✉️</span><span class="lbl">Mensagens de encaminhamento</span></button>
       <button class="nav-btn" data-target="sec-advogados"><span class="ic">⚖️</span><span class="lbl">Advogados</span></button>
       <div class="nav-sep"></div>
@@ -269,6 +271,24 @@ Localização: Londrina, PR
     <button class="btn-save" onclick="salvarPersonalidade()">Salvar personalidade</button>
     <button class="btn-reset" onclick="restaurarPersonalidade()">Restaurar padrão</button>
     <div class="status" id="status-pers"></div>
+  </div>
+
+  <!-- O que o bot anota sobre os clientes / o que a triagem tenta descobrir -->
+  <div class="card hidden" id="sec-triagem">
+    <h2>O que anotar e perguntar<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Define o que o bot registra na ficha de cada cliente e o que ele tenta descobrir antes de encaminhar o caso. Um item por linha. As mudanças valem na hora, sem reiniciar.</span></span></h2>
+    <p class="sub">O que o bot guarda sobre cada cliente e o que ele procura saber na triagem. Escreva <b>um item por linha</b>. As alterações valem na hora, sem reiniciar.</p>
+
+    <div style="margin-bottom:6px;font-size:13px;color:#94a3b8">Anotar na ficha (quando o cliente mencionar)</div>
+    <textarea id="triagem-anotar" rows="11" placeholder="Um item por linha. Ex.: Cidade onde mora"></textarea>
+    <p class="sub" style="margin:6px 0 14px">O bot <b>não pergunta</b> por estes itens: ele apenas registra os que aparecerem na conversa. Pode ser uma lista longa, sem prejuízo para o atendimento — e ele continua anotando o que for relevante mesmo que não esteja aqui.</p>
+
+    <div style="margin-bottom:6px;font-size:13px;color:#94a3b8">Tentar descobrir antes de encaminhar (no máximo ${MAX_DESCOBRIR} itens)</div>
+    <textarea id="triagem-descobrir" rows="6" placeholder="Um item por linha. Ex.: Desde quando (datas)"></textarea>
+    <p class="sub" style="margin:6px 0 8px">⚠️ Aqui o bot <b>pergunta</b>. Vá com calma: quanto mais itens, mais o atendimento vira formulário e mais gente desiste no meio. São prioridades, não obrigações — o bot continua encaminhando na hora se o cliente pedir para falar com alguém, ficar impaciente ou o caso for urgente, mesmo faltando itens. Por isso o limite de ${MAX_DESCOBRIR}.</p>
+
+    <button class="btn-save" onclick="salvarTriagem()">Salvar</button>
+    <button class="btn-reset" onclick="restaurarTriagem()">Restaurar padrão</button>
+    <div class="status" id="status-triagem"></div>
   </div>
 
   <!-- Mensagens de encaminhamento -->
@@ -789,6 +809,43 @@ Localização: Londrina, PR
     setStatusMsg('Padrão carregado no editor. Clique em "Salvar mensagens" para aplicar.', true);
   }
 
+  // ---- O que anotar e perguntar ----
+  let triagemPadrao = { anotar: '', descobrir: '' };
+  function setStatusTriagem(msg, ok){
+    const s = document.getElementById('status-triagem');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  async function carregarTriagem(){
+    try {
+      const r = await fetch('/api/triagem');
+      const d = await r.json();
+      triagemPadrao = { anotar: d.padraoAnotar || '', descobrir: d.padraoDescobrir || '' };
+      document.getElementById('triagem-anotar').value = d.anotar || '';
+      document.getElementById('triagem-descobrir').value = d.descobrir || '';
+    } catch (e) { setStatusTriagem('Erro ao carregar: ' + e.message, false); }
+  }
+  async function salvarTriagem(){
+    const anotar = document.getElementById('triagem-anotar').value;
+    const descobrir = document.getElementById('triagem-descobrir').value;
+    try {
+      const r = await fetch('/api/triagem', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anotar, descobrir }) });
+      const d = await r.json();
+      if (d.erro) return setStatusTriagem('Erro: ' + d.erro, false);
+      // Recarrega os campos: a lista de perguntas pode ter sido cortada no limite.
+      document.getElementById('triagem-anotar').value = d.anotar || '';
+      document.getElementById('triagem-descobrir').value = d.descobrir || '';
+      if (d.cortados > 0) {
+        return setStatusTriagem('Salvo, mas ' + d.cortados + ' item(ns) de "tentar descobrir" foram descartados: o limite é ${MAX_DESCOBRIR}. O que sobrou já vale para os próximos atendimentos.', false);
+      }
+      setStatusTriagem('Salvo! Já vale para as próximas mensagens.', true);
+    } catch (e) { setStatusTriagem('Erro ao salvar: ' + e.message, false); }
+  }
+  function restaurarTriagem(){
+    document.getElementById('triagem-anotar').value = triagemPadrao.anotar;
+    document.getElementById('triagem-descobrir').value = triagemPadrao.descobrir;
+    setStatusTriagem('Padrão carregado no editor. Clique em "Salvar" para aplicar.', true);
+  }
+
   // ---- Atendimento por cliente (pausar/reativar) ----
   function setStatusAtend(msg, ok){
     const s = document.getElementById('status-atend');
@@ -969,6 +1026,7 @@ Localização: Londrina, PR
   carregarGeminiKey();
   carregarEscritorio();
   carregarPersonalidade();
+  carregarTriagem();
   carregarMensagens();
   carregarAdvs();
   carregarClientes();
@@ -1137,6 +1195,24 @@ function iniciarPainel(porta = 3000) {
     // Salvar a personalidade do bot.
     if (req.method === 'POST' && req.url === '/api/personalidade') {
       return lerCorpo(req, res, (corpo) => salvarPersonalidade(corpo.texto));
+    }
+
+    // Ler o que anotar/perguntar (listas atuais + defaults de fabrica).
+    if (req.method === 'GET' && req.url === '/api/triagem') {
+      const t = getTriagem();
+      return enviarJson(res, 200, {
+        anotar: t.anotar,
+        descobrir: t.descobrir,
+        padraoAnotar: ANOTAR_PADRAO,
+        padraoDescobrir: DESCOBRIR_PADRAO,
+        maxDescobrir: MAX_DESCOBRIR,
+      });
+    }
+
+    // Salvar o que anotar/perguntar. A resposta traz "cortados" quando a lista
+    // de perguntas passou do limite (o painel avisa em vez de fingir que salvou).
+    if (req.method === 'POST' && req.url === '/api/triagem') {
+      return lerCorpo(req, res, (corpo) => salvarTriagem(corpo));
     }
 
     // Ler as mensagens de encaminhamento (texto atual + defaults de fabrica).

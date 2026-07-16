@@ -201,7 +201,9 @@ async function chamarDeepSeek(messages, tentativas = 3) {
         model: DEEPSEEK_MODEL,
         messages,
         temperature: 0.7,
-        max_tokens: 600,
+        // Teto do JSON inteiro, e "perfil.observacoes" cresce com a conversa.
+        // Truncar geraria JSON invalido; o teto so limita, nao gasta.
+        max_tokens: 1000,
       });
       const content = completion.choices?.[0]?.message?.content?.trim();
       if (content) return content;
