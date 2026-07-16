@@ -46,11 +46,35 @@ if errorlevel 1 (
 echo Procurando atualizacoes...
 set "GIT_TERMINAL_PROMPT=0"
 for /f "delims=" %%i in ('git rev-parse HEAD 2^>nul') do set "REV_ANTES=%%i"
-git pull --ff-only
+rem Descobre a branch atual (fallback: main) para saber com quem alinhar.
+set "BRANCH=main"
+for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "BRANCH=%%b"
+if "!BRANCH!"=="HEAD" set "BRANCH=main"
+
+rem Busca as atualizacoes do servidor. Sem internet -> segue com a versao atual.
+git fetch origin
 if errorlevel 1 (
-  echo [INFO] Nao foi possivel atualizar agora ^(sem internet ou alteracoes locais^). Seguindo.
+  echo [INFO] Sem internet para atualizar agora. Seguindo com a versao atual.
   goto APOS_UPDATE
 )
+
+rem Caso comum: avanca em linha reta ate o remoto.
+git merge --ff-only "origin/!BRANCH!"
+if not errorlevel 1 goto UPDATE_OK
+
+rem Nao deu fast-forward: o historico do servidor foi reescrito (force-push) ou
+rem ha commits/alteracoes locais neste PC. Esta maquina so CONSOME atualizacoes,
+rem entao alinhamos forcado com o servidor. Os dados sensiveis (.env, db, sessao
+rem do WhatsApp, whitelist, clientes...) sao git-ignored e NAO sao afetados pelo
+rem reset --hard (ele so mexe em arquivos versionados).
+echo [INFO] Historico divergente do servidor ^(force-push^). Alinhando com origin/!BRANCH!...
+git reset --hard "origin/!BRANCH!"
+if errorlevel 1 (
+  echo [INFO] Nao foi possivel alinhar com o servidor agora. Seguindo com a versao atual.
+  goto APOS_UPDATE
+)
+
+:UPDATE_OK
 for /f "delims=" %%i in ('git rev-parse HEAD 2^>nul') do set "REV_DEPOIS=%%i"
 if "!REV_ANTES!"=="!REV_DEPOIS!" (
   echo [OK] Ja esta na versao mais recente.
