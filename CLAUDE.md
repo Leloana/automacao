@@ -83,6 +83,13 @@ responde de fato (evita F5 em PCs lentos).
    vídeo/documento, ou em falha/arquivo grande (`MIDIA_MAX_MB`), cai no comportamento
    antigo (`tratarMidia`): avisa o cliente e alerta o número padrão, com cooldown por
    número (`MIDIA_COOLDOWN_MS`).
+   `tratarMidiaComIA` trata as duas etapas **separadamente** — baixar do WhatsApp
+   (`baixarMidia`, com 3 tentativas) e entender no Gemini —, com log e aviso próprios
+   para cada uma. Não junte: são causas diferentes, e o aviso genérico anterior culpava
+   a chave do Google por falha de download. O `downloadMedia` da `whatsapp-web.js` roda
+   dentro da página do WhatsApp via Puppeteer e repassa o erro **minificado** de lá
+   (aparecia no log como `r`); por isso `detalharErro` loga nome/stack/campos extras, e
+   não só o `e.message`.
 5. **Debounce** (`DEBOUNCE_MS`, ~5s): mensagens em sequência são agrupadas num único
    atendimento (`enfileirarMensagem`/`pendentes`) e viram uma só resposta.
 6. `processarMensagens`: monta o array `[system, ...histórico, user]`, chama

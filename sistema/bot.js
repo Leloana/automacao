@@ -331,24 +331,103 @@ const ultimaMidiaPorNumero = new Map(); // numero -> timestamp (ms)
 const MIDIA_COOLDOWN_MS = Number(process.env.MIDIA_COOLDOWN_MS || 60000);
 
 /**
+ * Descreve um erro por inteiro, para o log.
+ *
+ * O downloadMedia() da whatsapp-web.js roda DENTRO da pagina do WhatsApp (via
+ * puppeteer) e repassa o que o codigo minificado de la lancar. Por isso o
+ * `e.message` sozinho costuma vir como uma letra ("r") — nome de variavel
+ * minificada, inutil para diagnostico. Aqui juntamos nome, mensagem, stack e o
+ * valor cru para o log dizer o que de fato aconteceu.
+ */
+function detalharErro(e) {
+  if (!(e instanceof Error)) {
+    try { return `valor lancado (nao-Error): ${JSON.stringify(e)}`; } catch (_) { return String(e); }
+  }
+  const partes = [`${e.name}: ${e.message}`];
+  if (e.status) partes.push(`status=${e.status}`);
+  // Campos extras que o WhatsApp/puppeteer costumam pendurar no erro.
+  const extras = Object.getOwnPropertyNames(e)
+    .filter((k) => !['name', 'message', 'stack', 'status'].includes(k));
+  for (const k of extras) {
+    try { partes.push(`${k}=${JSON.stringify(e[k])}`); } catch (_) { /* ignora campo nao serializavel */ }
+  }
+  return partes.join(' | ') + (e.stack ? `\n${e.stack}` : '');
+}
+
+/**
+ * Versao curta de detalharErro, para o AVISO do painel: uma linha, sem stack —
+ * o usuario nao usa terminal, mas o detalhe tecnico ajuda a distinguir chave
+ * (401/403) de cota (429) e de rede/proxy ("fetch failed"/timeout).
+ */
+function resumoErro(e) {
+  if (!(e instanceof Error)) return String(e);
+  return e.status ? `HTTP ${e.status}: ${e.message}` : (e.message || String(e));
+}
+
+/**
+ * Baixa a midia do WhatsApp com retentativa. O download passa pelos servidores
+ * de midia do WhatsApp e pode falhar de forma transitoria (midia ainda sendo
+ * resolvida, rede, reupload em andamento) — uma segunda tentativa costuma pegar
+ * a midia ja resolvida. Nao resolve falha estrutural, mas nao custa nada.
+ */
+async function baixarMidia(message, tentativas = 3) {
+  let ultimoErro;
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      const media = await message.downloadMedia();
+      if (media && media.data) return media;
+      // undefined/null = midia expirada ou nao baixavel; retentar pode resolver
+      // se ela ainda estava em REUPLOADING/FETCHING quando pedimos.
+      ultimoErro = new Error('WhatsApp nao devolveu a midia (expirada ou ainda sendo preparada)');
+    } catch (e) {
+      ultimoErro = e;
+    }
+    if (i < tentativas - 1) {
+      console.warn(`[MIDIA-IA] Download falhou (tentativa ${i + 1}/${tentativas}): ${detalharErro(ultimoErro)}`);
+      await espera(1500 * (i + 1));
+    }
+  }
+  throw ultimoErro;
+}
+
+/**
  * Trata audio/imagem com a IA multimodal (Gemini): baixa a midia, converte em
  * texto (transcricao ou descricao) e enfileira esse texto no fluxo normal —
  * debounce, historico e triagem da DeepSeek seguem identicos ao de uma mensagem
  * digitada. Qualquer falha cai no fluxo antigo de aviso (tratarMidia).
+ *
+ * As duas etapas (baixar do WhatsApp / entender no Gemini) tem tratamento
+ * SEPARADO de proposito: sao problemas diferentes, com causas e solucoes
+ * diferentes, e antes um erro de download aparecia no painel como "problema na
+ * chave do Google" — mandando o usuario mexer na chave errada.
  */
 async function tratarMidiaComIA(client, message, from, numero, nomeDisplay) {
   const ehAudio = message.type !== 'image';
+
+  // ETAPA 1 — baixar a midia do WhatsApp.
+  let media;
   try {
-    const media = await message.downloadMedia();
-    if (!media || !media.data) throw new Error('Não foi possível baixar a mídia');
+    media = await baixarMidia(message);
+  } catch (e) {
+    console.error(`[MIDIA-IA] Falha ao BAIXAR ${message.type} de ${numero} (o Gemini nem chegou a ser chamado): ${detalharErro(e)}`);
+    avisos.registrar('aviso', 'Não consegui baixar um áudio ou imagem de um cliente.',
+      `Cliente ${nomeDisplay || numero}. A mídia não veio do WhatsApp — não é problema da chave do Google. ` +
+      `Erro técnico: ${resumoErro(e)}. ` +
+      'Pode ser instabilidade do WhatsApp ou mídia expirada. ' +
+      'O atendimento seguiu o fluxo padrão: o cliente foi avisado de que uma pessoa vai responder e o advogado foi alertado.');
+    return tratarMidia(client, message, numero, nomeDisplay);
+  }
 
-    // Tamanho do binario a partir do base64 (~3/4 do comprimento).
-    const bytes = Math.floor(media.data.length * 3 / 4);
-    if (bytes > midia.MIDIA_MAX_BYTES) {
-      console.warn(`[MIDIA-IA] ${numero}: ${message.type} muito grande (${Math.round(bytes / 1024 / 1024)}MB); caindo no aviso padrao.`);
-      return tratarMidia(client, message, numero, nomeDisplay);
-    }
+  // Tamanho do binario a partir do base64 (~3/4 do comprimento).
+  const bytes = Math.floor(media.data.length * 3 / 4);
+  if (bytes > midia.MIDIA_MAX_BYTES) {
+    console.warn(`[MIDIA-IA] ${numero}: ${message.type} muito grande (${Math.round(bytes / 1024 / 1024)}MB); caindo no aviso padrao.`);
+    return tratarMidia(client, message, numero, nomeDisplay);
+  }
 
+  // ETAPA 2 — entender a midia (Gemini) e devolver ao fluxo normal.
+  try {
+    console.log(`[MIDIA-IA] ${numero}: ${message.type} baixado (${(bytes / 1024).toFixed(0)}KB, ${media.mimetype}); enviando ao Gemini...`);
     const conteudo = ehAudio
       ? await midia.transcreverAudio(media.data, media.mimetype)
       : await midia.descreverImagem(media.data, media.mimetype);
@@ -363,12 +442,12 @@ async function tratarMidiaComIA(client, message, from, numero, nomeDisplay) {
     console.log(`[MIDIA-IA] ${numero}: ${message.type} convertido em texto (${conteudo.length} caracteres).`);
     enfileirarMensagem(client, from, texto, message, numero, nomeDisplay);
   } catch (e) {
-    // Detalhe tecnico do erro, para o diagnostico aparecer no painel e no log.txt:
-    // 401/403 = chave; 429 = cota; "fetch failed"/timeout = rede/proxy do escritorio.
-    const detalhe = e && e.status ? `HTTP ${e.status}: ${e.message}` : ((e && e.message) || String(e));
-    console.error(`[MIDIA-IA] Falha ao processar ${message.type} de ${numero}: ${detalhe}`);
+    // Log: erro completo. Painel: so o resumo tecnico (401/403 = chave; 429 =
+    // cota; "fetch failed"/timeout = rede/proxy do escritorio).
+    console.error(`[MIDIA-IA] Falha do GEMINI ao entender ${message.type} de ${numero} (download OK): ${detalharErro(e)}`);
     avisos.registrar('aviso', 'Não consegui entender um áudio ou imagem de um cliente.',
-      `Cliente ${nomeDisplay || numero}. Erro técnico: ${detalhe}. ` +
+      `Cliente ${nomeDisplay || numero}. A mídia foi baixada do WhatsApp, mas o serviço do Google falhou. ` +
+      `Erro técnico: ${resumoErro(e)}. ` +
       'Causas comuns: chave do Google inválida/expirada (aba "Chave da API"), cota esgotada (HTTP 429) ou ' +
       'bloqueio de rede/proxy do escritório impedindo o acesso ao Google (mensagens como "fetch failed"/timeout). ' +
       'O atendimento seguiu o fluxo padrão: o cliente foi avisado de que uma pessoa vai responder e o advogado foi alertado.');

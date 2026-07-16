@@ -1,0 +1,11 @@
+# Este .gitignore cobre a RAIZ do projeto. O de dentro de "sistema/" so vale de
+# la para baixo — por isso segredos e logs deixados aqui na raiz ficavam
+# desprotegidos e podiam ir para o repositorio sem querer.
+
+# Segredos (PRIVACIDADE/LGPD) - nunca vao para o repositorio
+chaves.txt
+*.env
+
+# Logs gerados em runtime (contem dados de cliente)
+log.txt
+log-anterior.txt
