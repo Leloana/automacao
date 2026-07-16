@@ -90,6 +90,19 @@ responde de fato (evita F5 em PCs lentos).
    dentro da página do WhatsApp via Puppeteer e repassa o erro **minificado** de lá
    (aparecia no log como `r`); por isso `detalharErro` loga nome/stack/campos extras, e
    não só o `e.message`.
+
+   ⚠️ **`corrigirIdSerializado` — não remova.** O WhatsApp Web tirou a propriedade
+   `_serialized` da classe do id da mensagem (MsgKey). O id chega no Node como objeto
+   simples `{ fromMe, remote, id, participant, $1 }` — o valor serializado existe, mas
+   virou **`$1`**. A `whatsapp-web.js` ainda lê `this.id._serialized` (~130 lugares); no
+   `downloadMedia` isso vira `Msg.get(undefined)` → `getMessagesById([undefined])` →
+   `bulkGet` no IndexedDB sem chave → `DataError`, que atravessa o Puppeteer e chega
+   como `r: r`. Era a causa de **toda** falha de áudio/imagem (o Gemini nunca teve
+   culpa). Corrigimos no nosso lado (não em `node_modules`, que um `npm install` apaga),
+   preenchendo `_serialized` só quando ausente — quando a lib corrigir, vira no-op.
+   Para investigar erros minificados assim: conecte no Chromium do bot pelo
+   `DevToolsActivePort` (`puppeteer.connect`) e capture o erro **dentro** da página, onde
+   ele ainda está inteiro.
 5. **Debounce** (`DEBOUNCE_MS`, ~5s): mensagens em sequência são agrupadas num único
    atendimento (`enfileirarMensagem`/`pendentes`) e viram uma só resposta.
 6. `processarMensagens`: monta o array `[system, ...histórico, user]`, chama

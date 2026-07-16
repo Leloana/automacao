@@ -365,12 +365,57 @@ function resumoErro(e) {
 }
 
 /**
+ * CORRIGE O ID DA MENSAGEM (causa raiz da falha de audio/imagem).
+ *
+ * O WhatsApp Web mudou a classe do id da mensagem (MsgKey) e TIROU a propriedade
+ * `_serialized`. Hoje o id chega da pagina como objeto simples assim:
+ *   { fromMe, remote, id, participant, $1: "false_5514...@c.us_ABC123" }
+ * O valor serializado existe — mudou de nome para `$1`.
+ *
+ * A whatsapp-web.js ainda le `this.id._serialized` (em ~130 lugares). No
+ * downloadMedia isso vira `Msg.get(undefined)` -> null -> `getMessagesById([undefined])`
+ * -> bulkGet no IndexedDB SEM chave -> DataError. Como o erro atravessa o
+ * puppeteer, a classe minificada some e sobra so "r" no log — foi o que
+ * despistou o diagnostico para o lado do Gemini (que sempre esteve OK).
+ *
+ * Por isso audio/imagem "funcionava antes e parou sozinho": mudou o WhatsApp,
+ * nao este projeto. Preenchemos o `_serialized` que falta, sem tocar em
+ * node_modules (um `npm install` apagaria). So preenche quando esta ausente:
+ * quando a whatsapp-web.js corrigir isso, esta funcao vira no-op sozinha.
+ */
+function corrigirIdSerializado(message) {
+  const id = message && message.id;
+  if (!id || typeof id !== 'object' || id._serialized) return id && id._serialized;
+
+  // 1) O proprio valor serializado, so que com o nome novo.
+  if (typeof id.$1 === 'string' && id.$1) {
+    id._serialized = id.$1;
+    return id._serialized;
+  }
+  // 2) Reconstroi no formato do WhatsApp: fromMe_remote_id[_participant].
+  if (id.remote && id.id) {
+    id._serialized = [id.fromMe ? 'true' : 'false', String(id.remote), String(id.id)]
+      .concat(id.participant ? [String(id.participant)] : [])
+      .join('_');
+    return id._serialized;
+  }
+  return undefined;
+}
+
+/**
  * Baixa a midia do WhatsApp com retentativa. O download passa pelos servidores
  * de midia do WhatsApp e pode falhar de forma transitoria (midia ainda sendo
  * resolvida, rede, reupload em andamento) — uma segunda tentativa costuma pegar
  * a midia ja resolvida. Nao resolve falha estrutural, mas nao custa nada.
  */
 async function baixarMidia(message, tentativas = 3) {
+  // Sem isso, o download falha SEMPRE (ver corrigirIdSerializado).
+  const idOk = corrigirIdSerializado(message);
+  if (!idOk) {
+    console.warn('[MIDIA-IA] Nao consegui montar o id da mensagem; o download vai falhar. ' +
+      `Formato inesperado do id: ${JSON.stringify(message && message.id)}`);
+  }
+
   let ultimoErro;
   for (let i = 0; i < tentativas; i++) {
     try {
