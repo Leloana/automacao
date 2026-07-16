@@ -290,6 +290,13 @@ async function handleMessage(client, message) {
     if (TIPOS_MIDIA_IA.includes(message.type) && midia.temGeminiKey()) {
       await tratarMidiaComIA(client, message, from, numero, nomeDisplay);
     } else {
+      // Ajuda a diagnosticar: se e um tipo que o Gemini trataria (audio/imagem)
+      // mas caiu aqui, e porque a chave nao esta em memoria (nao foi carregada do
+      // .env no boot nem aplicada pelo painel) — diferente de video/documento, que
+      // sempre caem no aviso.
+      if (TIPOS_MIDIA_IA.includes(message.type) && !midia.temGeminiKey()) {
+        console.warn(`[MIDIA] ${numero}: ${message.type} recebido, mas GEMINI_API_KEY nao esta em memoria — caindo no aviso padrao. Verifique a aba "Chave da API" (salve novamente) ou reinicie o bot.`);
+      }
       await tratarMidia(client, message, numero, nomeDisplay);
     }
     return;
@@ -356,9 +363,14 @@ async function tratarMidiaComIA(client, message, from, numero, nomeDisplay) {
     console.log(`[MIDIA-IA] ${numero}: ${message.type} convertido em texto (${conteudo.length} caracteres).`);
     enfileirarMensagem(client, from, texto, message, numero, nomeDisplay);
   } catch (e) {
-    console.error(`[MIDIA-IA] Falha ao processar ${message.type} de ${numero}:`, e.message);
+    // Detalhe tecnico do erro, para o diagnostico aparecer no painel e no log.txt:
+    // 401/403 = chave; 429 = cota; "fetch failed"/timeout = rede/proxy do escritorio.
+    const detalhe = e && e.status ? `HTTP ${e.status}: ${e.message}` : ((e && e.message) || String(e));
+    console.error(`[MIDIA-IA] Falha ao processar ${message.type} de ${numero}: ${detalhe}`);
     avisos.registrar('aviso', 'Não consegui entender um áudio ou imagem de um cliente.',
-      `Cliente ${nomeDisplay || numero}. Pode ser instabilidade do serviço do Google ou problema na chave (aba "Chave da API"). ` +
+      `Cliente ${nomeDisplay || numero}. Erro técnico: ${detalhe}. ` +
+      'Causas comuns: chave do Google inválida/expirada (aba "Chave da API"), cota esgotada (HTTP 429) ou ' +
+      'bloqueio de rede/proxy do escritório impedindo o acesso ao Google (mensagens como "fetch failed"/timeout). ' +
       'O atendimento seguiu o fluxo padrão: o cliente foi avisado de que uma pessoa vai responder e o advogado foi alertado.');
     await tratarMidia(client, message, numero, nomeDisplay);
   }

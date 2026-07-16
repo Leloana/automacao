@@ -31,9 +31,13 @@ function gravarEnv(nome, valor) {
   }
 
   const linha = nome + '=' + valor;
-  const re = new RegExp('^' + nome + '=.*$', 'm');
+  // Escapa o nome ao montar o regex (nomes atuais sao seguros, mas evita surpresa)
+  // e usa uma FUNCAO como substituicao: string literal faria o replace interpretar
+  // "$" do valor da chave como padrao especial ($&, $', $`), corrompendo-a.
+  const nomeEsc = nome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('^' + nomeEsc + '=.*$', 'm');
   if (re.test(env)) {
-    env = env.replace(re, linha);
+    env = env.replace(re, () => linha);
   } else {
     if (env && !env.endsWith('\n')) env += '\n';
     env += linha + '\n';

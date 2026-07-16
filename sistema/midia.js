@@ -86,11 +86,16 @@ async function chamarGemini(base64, mimetype, prompt, tentativas = 2) {
         if (resp.status >= 400 && resp.status < 500 && resp.status !== 429) throw err;
         ultimoErro = err;
       } else {
-        const partes = (data && data.candidates && data.candidates[0]
-          && data.candidates[0].content && data.candidates[0].content.parts) || [];
-        const texto = partes.map((p) => p.text || '').join('').trim();
+        const cand = (data && data.candidates && data.candidates[0]) || {};
+        const partes = (cand.content && cand.content.parts) || [];
+        // Modelos gemini-3 sao "thinking": ignora partes de raciocinio (thought)
+        // para nao poluir a transcricao/descricao com o pensamento do modelo.
+        const texto = partes.filter((p) => !p.thought).map((p) => p.text || '').join('').trim();
         if (texto) return texto;
-        ultimoErro = new Error('Resposta vazia do Gemini');
+        // Sem texto: expoe o finishReason (ex.: MAX_TOKENS, SAFETY) no erro para
+        // facilitar o diagnostico no painel/log.
+        const fr = cand.finishReason ? ` (finishReason=${cand.finishReason})` : '';
+        ultimoErro = new Error('Resposta vazia do Gemini' + fr);
       }
     } catch (e) {
       if (e.status >= 400 && e.status < 500 && e.status !== 429) throw e;
