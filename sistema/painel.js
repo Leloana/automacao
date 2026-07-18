@@ -6,7 +6,7 @@
 
 const http = require('http');
 const qrcode = require('qrcode');
-const { lerConfig, salvarConfig, setLiberarTodos, soDigitos, variantes } = require('./whitelist');
+const { lerConfig, salvarConfig, setLiberarTodos, bloquearNumero, desbloquearNumero, soDigitos, variantes } = require('./whitelist');
 const { getPersonalidade, salvarPersonalidade, PERSONALIDADE_PADRAO } = require('./prompt');
 const { getMensagens, salvarMensagens, MSG_CLIENTE_PADRAO, MSG_ADVOGADO_PADRAO } = require('./mensagens');
 const { getTriagem, salvarTriagem, ANOTAR_PADRAO, DESCOBRIR_PADRAO, MAX_DESCOBRIR } = require('./triagem');
@@ -399,6 +399,13 @@ Localização: Londrina, PR
     </div>
 
     <div class="status" id="status-liberar"></div>
+
+    <!-- Blacklist: numeros que nunca sao respondidos, nem no modo liberado -->
+    <hr style="border:0;border-top:1px solid #2a2a2a;margin:24px 0" />
+    <h2 style="font-size:16px">Números bloqueados<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Quem está aqui nunca recebe resposta do bot, nem com "responder todo mundo" ligado. Um número entra nesta lista quando você usa "Remover autorização deste cliente" na aba Clientes.</span></span></h2>
+    <p class="sub">Estes números <b>nunca</b> são respondidos pelo bot — nem quando o "responder todo mundo" está ligado. Um número entra aqui quando você clica em <b>"Remover autorização deste cliente"</b> na aba <b>Clientes</b>.</p>
+    <div id="bloq-lista"><p class="sub">Carregando...</p></div>
+    <div class="status" id="status-bloq"></div>
   </div>
     </main>
   </div>
@@ -663,14 +670,17 @@ Localização: Londrina, PR
   }
   async function removerAutorizacao(){
     if (!clienteAtual) return setStatusCli('Selecione um cliente primeiro.', false);
-    if (!confirm('Remover a autorização deste cliente? O bot vai parar de responder este número. O histórico e o contexto são mantidos.')) return;
+    if (!confirm('Remover a autorização deste cliente? O bot vai parar de responder este número — inclusive se o "responder todo mundo" estiver ligado (o número entra na lista de bloqueados). O histórico e o contexto são mantidos.')) return;
     try {
       const r = await fetch('/api/whitelist/remover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: clienteAtual }) });
       const d = await r.json();
       if (d.erro) return setStatusCli('Erro: ' + d.erro, false);
-      setStatusCli('Autorização removida. O bot não responde mais este número.', true);
+      setStatusCli('Autorização removida e número bloqueado. O bot não responde mais este número' +
+        (d.liberarTodos ? ', mesmo com o "responder todo mundo" ligado.' : '.') +
+        ' Para desfazer, veja "Números bloqueados" na aba "Responder todo mundo".', true);
       carregarClientes();
       carregarAtendimentos();
+      carregarBloqueados();
     } catch (e) { setStatusCli('Erro ao remover: ' + e.message, false); }
   }
 
@@ -1012,6 +1022,55 @@ Localização: Londrina, PR
     } catch (e) { setStatusLiberar('Erro ao desligar: ' + e.message, false); }
   }
 
+  // ---- Números bloqueados (blacklist) ----
+  function setStatusBloq(msg, ok){
+    const s = document.getElementById('status-bloq');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  async function carregarBloqueados(){
+    try {
+      const r = await fetch('/api/bloqueados');
+      const d = await r.json();
+      renderBloqueados(d.bloqueados || []);
+    } catch (e) { /* ignora; tenta de novo depois */ }
+  }
+  function renderBloqueados(lista){
+    const box = document.getElementById('bloq-lista');
+    box.innerHTML = '';
+    if (!lista.length) {
+      box.innerHTML = '<p class="sub">Nenhum número bloqueado.</p>';
+      return;
+    }
+    lista.forEach((b) => {
+      const div = document.createElement('div');
+      div.className = 'adv';
+      div.style.display = 'flex';
+      div.style.alignItems = 'center';
+      div.style.gap = '10px';
+      div.innerHTML =
+        '<div style="flex:1">' +
+          '<div style="font-weight:600">' + esc(b.nome || b.numero) + '</div>' +
+          '<div class="sub" style="margin:2px 0 0">' + esc(b.numero) + ' · 🚫 bloqueado</div>' +
+        '</div>';
+      const btn = document.createElement('button');
+      btn.className = 'btn-add';
+      btn.textContent = 'Desbloquear';
+      btn.onclick = () => desbloquear(b.numero, b.nome);
+      div.appendChild(btn);
+      box.appendChild(div);
+    });
+  }
+  async function desbloquear(numero, nome){
+    if (!confirm('Desbloquear ' + (nome || numero) + '?\\n\\nEle NÃO volta a ser cliente autorizado: passa a valer a regra normal (só é respondido se estiver na lista de clientes, ou se o "responder todo mundo" estiver ligado).')) return;
+    try {
+      const r = await fetch('/api/bloqueados/remover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ numero }) });
+      const d = await r.json();
+      if (d.erro) return setStatusBloq('Erro: ' + d.erro, false);
+      setStatusBloq('Número desbloqueado.', true);
+      carregarBloqueados();
+    } catch (e) { setStatusBloq('Erro ao desbloquear: ' + e.message, false); }
+  }
+
   // ---- Navegacao lateral: mostra uma secao (card) por vez ----
   function mostrarSecao(id){
     document.querySelectorAll('.content > .card').forEach((s) => s.classList.toggle('hidden', s.id !== id));
@@ -1033,6 +1092,7 @@ Localização: Londrina, PR
   carregarAtendimentos();
   carregarAvisos();
   carregarLiberar();
+  carregarBloqueados();
   atualizarStatus();
   setInterval(atualizarStatus, 2500); // verifica a conexao a cada 2,5s
   setInterval(carregarAvisos, 5000); // atualiza o contador de avisos
@@ -1142,9 +1202,14 @@ function iniciarPainel(porta = 3000) {
         const nome = String(corpo.nome || '').trim();
         if (!nome) throw new Error('Informe o nome do cliente.');
 
-        // 1) Autoriza o numero (salvarConfig normaliza e remove duplicados).
+        // 1) Autoriza o numero (salvarConfig normaliza e remove duplicados) e
+        //    tira da blacklist, senao o cadastro nao teria efeito.
         const cfg = lerConfig();
-        salvarConfig({ numeros: [...cfg.numeros, numero] });
+        const vars = variantes(numero);
+        salvarConfig({
+          numeros: [...cfg.numeros, numero],
+          bloqueados: cfg.bloqueados.filter((n) => !vars.includes(n)),
+        });
 
         // 2) Cria/recupera o cadastro e grava o nome informado.
         const cliente = db.getOrCreateCliente(numero, nome, INSTITUICAO_PADRAO_ID);
@@ -1162,13 +1227,37 @@ function iniciarPainel(porta = 3000) {
 
     // Remover a autorizacao (whitelist) de um cliente pelo id. O cadastro e o
     // historico sao mantidos; o bot apenas para de responder esse numero.
+    // Alem de tirar da lista de autorizados, o numero entra na BLACKLIST: sem
+    // isso, com o modo "responder todo mundo" ligado o bot continuaria
+    // respondendo (a whitelist e ignorada nesse modo).
     if (req.method === 'POST' && req.url === '/api/whitelist/remover') {
       return lerCorpo(req, res, (corpo) => {
         const c = db.getCliente(Number(corpo.id));
         if (!c) throw new Error('Cliente não encontrado.');
-        const vars = variantes(soDigitos(c.numero_telefone));
-        const cfg = lerConfig();
-        salvarConfig({ numeros: cfg.numeros.filter((n) => !vars.includes(n)) });
+        const cfg = bloquearNumero(c.numero_telefone);
+        return { ok: true, liberarTodos: cfg.liberarTodos };
+      });
+    }
+
+    // Lista os numeros bloqueados (blacklist), com o nome do cliente quando
+    // houver cadastro. Mostrada na aba "Responder todo mundo".
+    if (req.method === 'GET' && req.url === '/api/bloqueados') {
+      const clientes = db.listClientes();
+      const lista = lerConfig().bloqueados.map((numero) => {
+        const vars = variantes(numero);
+        const c = clientes.find((x) => vars.includes(soDigitos(x.numero_telefone)));
+        return { numero, nome: c ? c.nome_display : '' };
+      });
+      return enviarJson(res, 200, { liberarTodos: lerConfig().liberarTodos, bloqueados: lista });
+    }
+
+    // Tira um numero da blacklist. Ele NAO volta a ser autorizado: volta a
+    // valer a regra normal (whitelist, ou "responder todo mundo" se ligado).
+    if (req.method === 'POST' && req.url === '/api/bloqueados/remover') {
+      return lerCorpo(req, res, (corpo) => {
+        const numero = soDigitos(corpo.numero);
+        if (!numero) throw new Error('Informe o número.');
+        desbloquearNumero(numero);
         return { ok: true };
       });
     }

@@ -4,6 +4,9 @@
 // da lista. Existe uma excecao PERIGOSA: o modo "liberarTodos" (responder todo
 // mundo), que desliga a whitelist e faz o bot responder QUALQUER numero. Esse
 // modo so deve ser ligado de proposito pelo painel (com varios avisos).
+// Existe ainda a BLACKLIST (bloqueados): numeros que NUNCA sao respondidos,
+// nem com "responder todo mundo" ligado. E o unico jeito de silenciar alguem
+// enquanto o modo liberado esta ativo (ex.: "remover autorizacao" no painel).
 // A configuracao fica em whitelist.json (gerenciavel pelo painel web).
 
 const fs = require('fs');
@@ -24,7 +27,7 @@ function soDigitos(s) {
 function lerConfig() {
   try {
     if (!fs.existsSync(CONFIG_PATH)) {
-      return { habilitada: true, liberarTodos: false, numeros: [] };
+      return { habilitada: true, liberarTodos: false, numeros: [], bloqueados: [] };
     }
     const dados = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     return {
@@ -35,10 +38,14 @@ function lerConfig() {
       numeros: Array.isArray(dados.numeros)
         ? dados.numeros.map(soDigitos).filter(Boolean)
         : [],
+      // Blacklist: nunca respondidos, nem com liberarTodos ligado.
+      bloqueados: Array.isArray(dados.bloqueados)
+        ? dados.bloqueados.map(soDigitos).filter(Boolean)
+        : [],
     };
   } catch (e) {
     console.error('Erro ao ler whitelist.json:', e.message);
-    return { habilitada: true, liberarTodos: false, numeros: [] };
+    return { habilitada: true, liberarTodos: false, numeros: [], bloqueados: [] };
   }
 }
 
@@ -46,23 +53,22 @@ function lerConfig() {
  * Grava a configuracao (usado pelo painel). Normaliza os numeros e remove
  * duplicados. Retorna o objeto efetivamente salvo.
  */
-function salvarConfig({ numeros, liberarTodos } = {}) {
+function salvarConfig({ numeros, liberarTodos, bloqueados } = {}) {
   const atual = lerConfig();
-  const limpos = Array.isArray(numeros)
-    ? [...new Set(
-        numeros
-          .map(soDigitos)
-          // Numero brasileiro: pais(55) + DDD(2) + numero(8 ou 9) = 12 ou 13 digitos.
-          .filter((n) => n.length >= 12 && n.length <= 13)
-      )]
-    // Sem 'numeros' no payload: preserva a lista atual (ex.: ao so alternar o
-    // modo "responder todo mundo", nao se mexe nos numeros cadastrados).
-    : atual.numeros;
+  // Numero brasileiro: pais(55) + DDD(2) + numero(8 ou 9) = 12 ou 13 digitos.
+  const normalizar = (lista) => [...new Set(
+    lista.map(soDigitos).filter((n) => n.length >= 12 && n.length <= 13)
+  )];
+  // Sem a lista no payload: preserva a atual (ex.: ao so alternar o modo
+  // "responder todo mundo", nao se mexe nos numeros cadastrados).
+  const limpos = Array.isArray(numeros) ? normalizar(numeros) : atual.numeros;
+  const bloqs = Array.isArray(bloqueados) ? normalizar(bloqueados) : atual.bloqueados;
   const conteudo = {
     habilitada: true,
     // Preserva o flag atual quando 'liberarTodos' nao vem no payload.
     liberarTodos: liberarTodos === undefined ? atual.liberarTodos : liberarTodos === true,
     numeros: limpos,
+    bloqueados: bloqs,
   };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(conteudo, null, 2), 'utf8');
   return conteudo;
@@ -100,9 +106,39 @@ function variantes(n) {
  */
 function numeroPermitido(numero) {
   const cfg = lerConfig();
-  if (cfg.liberarTodos) return true; // modo "responder todo mundo" ligado
   const vars = variantes(soDigitos(numero));
+  // A blacklist vem PRIMEIRO: bloqueado nunca e respondido, nem com o modo
+  // "responder todo mundo" ligado.
+  if (vars.some((v) => cfg.bloqueados.includes(v))) return false;
+  if (cfg.liberarTodos) return true; // modo "responder todo mundo" ligado
   return vars.some((v) => cfg.numeros.includes(v));
 }
 
-module.exports = { numeroPermitido, lerConfig, salvarConfig, setLiberarTodos, soDigitos, variantes };
+/**
+ * Bloqueia um numero (blacklist): o bot para de responder mesmo com o modo
+ * "responder todo mundo" ligado. Tambem tira o numero da lista de autorizados,
+ * senao ele voltaria a ser respondido ao desligar o modo liberado.
+ */
+function bloquearNumero(numero) {
+  const cfg = lerConfig();
+  const vars = variantes(soDigitos(numero));
+  return salvarConfig({
+    numeros: cfg.numeros.filter((n) => !vars.includes(n)),
+    bloqueados: [...cfg.bloqueados, soDigitos(numero)],
+  });
+}
+
+/**
+ * Tira um numero da blacklist. Ele NAO volta a ser autorizado: passa a valer a
+ * regra normal (whitelist, ou o modo "responder todo mundo" se estiver ligado).
+ */
+function desbloquearNumero(numero) {
+  const cfg = lerConfig();
+  const vars = variantes(soDigitos(numero));
+  return salvarConfig({ bloqueados: cfg.bloqueados.filter((n) => !vars.includes(n)) });
+}
+
+module.exports = {
+  numeroPermitido, lerConfig, salvarConfig, setLiberarTodos,
+  bloquearNumero, desbloquearNumero, soDigitos, variantes,
+};

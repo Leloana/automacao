@@ -262,10 +262,14 @@ echo [OK] Dependencias do Node prontas.
 
 rem O Chrome usado pelo WhatsApp fica no cache do usuario (fora do projeto);
 rem numa maquina nova ele pode faltar mesmo com node_modules presente.
-rem A verificacao abaixo pega DOIS casos: (a) navegador ausente e (b) download
-rem pela metade (pasta do navegador criada, mas SEM o .exe dentro) - foi isso que
+rem A verificacao pega DOIS casos: (a) navegador ausente e (b) download pela
+rem metade (pasta do navegador criada, mas SEM o .exe dentro) - foi isso que
 rem quebrou o boot. Nos dois casos, apagamos o cache e baixamos de novo.
-node -e "const fs=require('fs'),os=require('os'),path=require('path');const cache=process.env.PUPPETEER_CACHE_DIR||path.join(os.homedir(),'.cache','puppeteer');function hasExe(d){for(const e of fs.readdirSync(d)){const p=path.join(d,e),s=fs.statSync(p);if(s.isDirectory()){if(hasExe(p))return true}else if(e.toLowerCase().endsWith('.exe'))return true}return false}let ok=false;try{if(fs.existsSync(require('puppeteer').executablePath())){ok=true;for(const b of fs.readdirSync(cache)){const bp=path.join(cache,b);if(!fs.statSync(bp).isDirectory())continue;for(const v of fs.readdirSync(bp)){const vp=path.join(bp,v);if(fs.statSync(vp).isDirectory()&&!hasExe(vp))ok=false}}}}catch(e){ok=false}process.exit(ok?0:1)" >nul 2>nul
+rem A verificacao mora em verificar-navegador.js, e NAO num "node -e" aqui: este
+rem .bat roda com delayed expansion, que come tudo entre dois "!" — e o codigo
+rem usa "!". Inline, ele chegava mutilado ao Node e falhava SEMPRE, fazendo o bot
+rem rebaixar o Chrome (190 MB) a cada abertura. Nao traga o codigo de volta.
+node verificar-navegador.js >nul 2>nul
 if errorlevel 1 (
   echo.
   echo Baixando o navegador usado pelo WhatsApp ^(so na primeira vez^)...
@@ -314,9 +318,12 @@ echo.
 rem Abre o painel no navegador SO quando ele estiver realmente no ar. Antes
 rem abriamos apos 5s fixos: em PCs lentos o servidor ainda nao tinha subido e a
 rem pagina abria com erro (precisava apertar F5). Agora um processo em segundo
-rem plano testa a porta e so abre quando ela responde (espera ate ~90s).
-rem Roda minimizado e separado, para nao travar o bot.
-start "" /min powershell -NoProfile -WindowStyle Hidden -Command "$u='http://localhost:3000'; for($i=0;$i -lt 45;$i++){ try { [void](Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 $u); break } catch { Start-Sleep -Seconds 2 } }; Start-Process $u"
+rem plano testa a porta e so abre quando ela responde (espera ate ~60s).
+rem O teste e um TCP puro a cada 200ms (e nao um Invoke-WebRequest a cada 2s):
+rem o Invoke-WebRequest precisa carregar a pilha HTTP do .NET na 1a chamada e o
+rem sleep de 2s somava atraso a toa — o painel sobe logo no inicio do index.js,
+rem entao a pagina abre em ~1-2s. Roda minimizado e separado, para nao travar o bot.
+start "" /min powershell -NoProfile -WindowStyle Hidden -Command "$u='http://localhost:3000'; for($i=0;$i -lt 300;$i++){ $c=New-Object Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1',3000); $c.Close(); break } catch { Start-Sleep -Milliseconds 200 } finally { $c.Dispose() } }; Start-Process $u"
 
 rem Remove travas antigas da sessao do WhatsApp. Quando a instancia anterior e
 rem encerrada a forca (ou o PC desliga sem fechar o bot), o Chrome deixa arquivos

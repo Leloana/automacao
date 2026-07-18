@@ -73,6 +73,13 @@ responde de fato (evita F5 em PCs lentos).
    mundo" do painel) **desliga a whitelist** e faz o bot responder **qualquer número**;
    `numeroPermitido` retorna `true` para todos. Uso perigoso — a aba trava o acionamento
    atrás de vários avisos + dupla confirmação (ver painel).
+   Acima de tudo isso vem a **blacklist** (`bloqueados` em `whitelist.json`): checada
+   **primeiro** em `numeroPermitido`, ela silencia o número **mesmo com `liberarTodos`
+   ligado** — é o único jeito de calar alguém no modo liberado. "Remover autorização
+   deste cliente" (aba Clientes) chama `bloquearNumero`, que tira da whitelist **e**
+   bloqueia; sem isso o botão não teria efeito nenhum com o modo liberado ativo.
+   Cadastrar o número pela aba "Criar cliente" o desbloqueia (senão o cadastro seria
+   inócuo). `desbloquearNumero` **não** reautoriza: só devolve o número à regra normal.
 3b. **Pausa por cliente**: se o cliente está com `pausado = 1` (coluna na tabela
    `clientes`), o bot fica em **silêncio total** — não responde, não trata mídia, não
    enfileira nem registra. Serve para o advogado assumir o atendimento humano. Checado em
@@ -217,7 +224,8 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
   `.md` do cliente (`criarFichaCliente`), com nome/área/observações preenchidos pela
   secretária. Não lista clientes (há muitos).
 - **Clientes** — editor do contexto `.md` por cliente (dropdown) + botão **Remover
-  autorização** (tira o número da whitelist; mantém histórico/contexto).
+  autorização** (tira o número da whitelist **e o põe na blacklist**; mantém
+  histórico/contexto).
 - **Atendimento (pausar)** — lista os clientes com Pausar/Reativar (coluna `pausado`). Ao
   reativar, orienta o advogado a atualizar o contexto.
 - **Personalidade** — `personalidade.txt` (tom/estilo do bot).
@@ -235,7 +243,10 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
   ([whitelist.js](sistema/whitelist.js)) via `/api/liberar`. **Perigosa**: para *ligar* exige
   marcar a caixa de ciência (destrava o botão) + `confirm()` + digitar `LIBERAR`; ao ligar,
   registra um aviso ([avisos.js](sistema/avisos.js)). Para *desligar* (voltar a responder só
-  a lista) é um clique só. Estado exibido em banner.
+  a lista) é um clique só. Estado exibido em banner. No rodapé da aba fica a lista de
+  **Números bloqueados** (blacklist), com nome do cliente quando há cadastro e botão
+  **Desbloquear** (`/api/bloqueados`, `/api/bloqueados/remover`) — fica aqui porque é a
+  única exceção que continua valendo com o modo liberado ligado.
 
 Tudo é editável sem reiniciar o bot (os arquivos são lidos a cada uso). Em `EADDRINUSE`
 (porta já em uso) o painel encerra com mensagem clara.
