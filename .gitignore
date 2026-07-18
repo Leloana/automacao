@@ -6,6 +6,10 @@
 chaves.txt
 *.env
 
+# Senha da sincronizacao entre os PCs. O sync.php e versionado (nao tem segredo
+# dentro), mas este arquivo TEM a senha e fica so na maquina / no servidor.
+servidor/sync_config.php
+
 # Logs gerados em runtime (contem dados de cliente)
 log.txt
 log-anterior.txt

@@ -5,6 +5,7 @@
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const config = require('./config');
 
 // Garante que a pasta db/ exista antes de abrir o banco.
 const DB_DIR = path.join(__dirname, 'db');
@@ -17,9 +18,13 @@ const DB_PATH = path.join(DB_DIR, 'bot.db');
 const db = new Database(DB_PATH);
 
 // Quantas mensagens recentes do cliente enviamos ao modelo (e mantemos no banco)
-// como "janela" de contexto imediato. Configuravel por env; padrao 30 (~15 trocas).
+// como "janela" de contexto imediato. Editavel na aba "Outras opcoes" do painel
+// (config.js); padrao 30 (~15 trocas). Lido A CADA consulta, para a mudanca
+// valer sem reiniciar — por isso e funcao, e nao constante.
 // O contexto de longo prazo alem dessa janela e mantido no resumo .md do cliente.
-const HISTORICO_LIMIT = Number(process.env.HISTORICO_LIMIT) || 30;
+function historicoLimite() {
+  return config.lerConfig().historicoLimite;
+}
 
 // Recomendado para better-sqlite3: melhora concorrencia de leitura/escrita.
 db.pragma('journal_mode = WAL');
@@ -171,7 +176,7 @@ function getCliente(id) {
 }
 
 /**
- * Retorna as ultimas HISTORICO_LIMIT mensagens do cliente em ordem cronologica
+ * Retorna as ultimas historicoLimite() mensagens do cliente em ordem cronologica
  * (mais antiga primeiro), no formato [{ role, conteudo }].
  */
 function getHistorico(clienteId) {
@@ -182,7 +187,7 @@ function getHistorico(clienteId) {
     WHERE cliente_id = ?
     ORDER BY id DESC
     LIMIT ?
-  `).all(clienteId, HISTORICO_LIMIT);
+  `).all(clienteId, historicoLimite());
 
   return linhas.reverse();
 }
@@ -201,7 +206,7 @@ function saveMessage(clienteId, role, conteudo) {
 }
 
 /**
- * Mantem apenas as HISTORICO_LIMIT mensagens mais recentes do cliente,
+ * Mantem apenas as historicoLimite() mensagens mais recentes do cliente,
  * deletando as demais.
  */
 function pruneHistorico(clienteId) {
@@ -214,7 +219,7 @@ function pruneHistorico(clienteId) {
         ORDER BY id DESC
         LIMIT ?
       )
-  `).run(clienteId, clienteId, HISTORICO_LIMIT);
+  `).run(clienteId, clienteId, historicoLimite());
 }
 
 module.exports = {

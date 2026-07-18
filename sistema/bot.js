@@ -14,6 +14,7 @@ const { numeroPermitido } = require('./whitelist');
 const { renderMensagemCliente, renderMensagemAdvogado } = require('./mensagens');
 const midia = require('./midia');
 const avisos = require('./avisos');
+const config = require('./config');
 
 // Identifica se um erro da API e de autenticacao (chave invalida/ausente).
 function ehErroDeChave(err) {
@@ -218,15 +219,13 @@ async function chamarDeepSeek(messages, tentativas = 3) {
   throw new Error('Resposta vazia da DeepSeek apos varias tentativas');
 }
 
-// Tempo de espera (em ms) apos a ultima mensagem antes de responder. Funciona
-// como um "debounce": cada nova mensagem reinicia a contagem. Enquanto a pessoa
-// continua enviando mensagens, o bot aguarda; so depois de ~5s de silencio o
-// lote inteiro vira uma unica resposta. Configuravel pelo .env (DEBOUNCE_MS).
-const DEBOUNCE_MS = Number(process.env.DEBOUNCE_MS || 5000);
+// Tempo de espera antes de responder um lote e como ele e contado ficam em
+// config.js (aba "Outras opcoes" do painel), lidos A CADA mensagem — mudar a
+// opcao vale na hora. Ver calcularEsperaMs() abaixo.
 
 // Buffer de mensagens por remetente, para agrupar mensagens enviadas em
 // sequencia (que muitas vezes so fazem sentido juntas) em um unico atendimento.
-// Chave: "from" do WhatsApp. Valor: { mensagens, timer, ultimaMessage, numero, nomeDisplay }.
+// Chave: "from" do WhatsApp. Valor: { mensagens, timer, primeiraEm, ultimaMessage, numero, nomeDisplay }.
 const pendentes = new Map();
 
 /**
@@ -329,8 +328,8 @@ const NOMES_MIDIA = {
 };
 
 // Cooldown por numero para nao floodar cliente/advogado numa rajada de midias.
+// O intervalo vem de config.js (painel), lido a cada midia.
 const ultimaMidiaPorNumero = new Map(); // numero -> timestamp (ms)
-const MIDIA_COOLDOWN_MS = Number(process.env.MIDIA_COOLDOWN_MS || 60000);
 
 /**
  * Descreve um erro por inteiro, para o log.
@@ -510,7 +509,7 @@ async function tratarMidiaComIA(client, message, from, numero, nomeDisplay) {
 async function tratarMidia(client, message, numero, nomeDisplay) {
   // Evita repetir o aviso quando o cliente manda varias midias em sequencia.
   const agora = Date.now();
-  if (agora - (ultimaMidiaPorNumero.get(numero) || 0) < MIDIA_COOLDOWN_MS) {
+  if (agora - (ultimaMidiaPorNumero.get(numero) || 0) < config.lerConfig().midiaCooldownMs) {
     console.log(`[MIDIA] ${numero}: dentro do cooldown, aviso nao repetido.`);
     return;
   }
@@ -551,14 +550,42 @@ async function tratarMidia(client, message, numero, nomeDisplay) {
 }
 
 /**
- * Acumula a mensagem no buffer do remetente e reinicia o temporizador de
- * debounce. Quando passam DEBOUNCE_MS sem novas mensagens, processa o lote
- * inteiro de uma vez (todas as mensagens viram uma unica resposta).
+ * Calcula quanto ainda falta esperar antes de processar o lote, em ms.
+ *
+ * Dois modos (aba "Outras opcoes" do painel):
+ *
+ * - 'ultima' (padrao): conta a partir da ULTIMA mensagem — cada nova mensagem
+ *   reinicia a contagem inteira. Espera = esperaMs de silencio.
+ *
+ * - 'primeira': conta a partir da PRIMEIRA mensagem do lote, para dar um tempo
+ *   fixo de acolhida (ex.: 5 min) sem que o cliente falante adie a resposta
+ *   indefinidamente.
+ *
+ * ⚠️ O piso de silencio (MIN_SILENCIO_MS, 5s) vale nos DOIS modos e nunca e
+ * sobrescrito: o bot so responde depois de 5s sem mensagem nova, mesmo que o
+ * prazo contado da primeira mensagem ja tenha vencido. Sem isso, no modo
+ * 'primeira', uma mensagem que chega exatamente no fim do prazo seria cortada:
+ * o bot responderia sem te-la lido. Por isso pegamos o MAIOR dos dois prazos.
+ */
+function calcularEsperaMs(entrada, agora) {
+  const cfg = config.lerConfig();
+  const pisoSilencio = agora + config.MIN_SILENCIO_MS;
+  const alvo = cfg.esperaModo === 'primeira'
+    ? Math.max(entrada.primeiraEm + cfg.esperaMs, pisoSilencio)
+    : agora + cfg.esperaMs; // 'ultima': reinicia a contagem a cada mensagem
+  return alvo - agora;
+}
+
+/**
+ * Acumula a mensagem no buffer do remetente e (re)agenda o processamento do
+ * lote. Quando o prazo vence sem mensagem nova, o lote inteiro vira uma unica
+ * resposta. Ver calcularEsperaMs() para como o prazo e contado.
  */
 function enfileirarMensagem(client, from, texto, message, numero, nomeDisplay) {
   let entrada = pendentes.get(from);
   if (!entrada) {
-    entrada = { mensagens: [], timer: null };
+    // primeiraEm: marca o inicio do lote, usado pelo modo 'primeira'.
+    entrada = { mensagens: [], timer: null, primeiraEm: Date.now() };
     pendentes.set(from, entrada);
   }
 
@@ -567,7 +594,8 @@ function enfileirarMensagem(client, from, texto, message, numero, nomeDisplay) {
   entrada.numero = numero;
   entrada.nomeDisplay = nomeDisplay;
 
-  // Reinicia a contagem: enquanto chegarem mensagens, adia o processamento.
+  // Reagenda: enquanto chegarem mensagens, o processamento e adiado.
+  const espera = calcularEsperaMs(entrada, Date.now());
   if (entrada.timer) clearTimeout(entrada.timer);
   entrada.timer = setTimeout(() => {
     // Remove do buffer antes de processar: novas mensagens que cheguem durante
@@ -577,7 +605,7 @@ function enfileirarMensagem(client, from, texto, message, numero, nomeDisplay) {
     console.log(`[LOTE] ${from}: ${entrada.mensagens.length} mensagem(ns) agrupada(s)`);
     processarMensagens(client, entrada.ultimaMessage, textoCombinado, entrada.numero, entrada.nomeDisplay)
       .catch((err) => console.error('Erro ao processar lote de mensagens:', err));
-  }, DEBOUNCE_MS);
+  }, espera);
 }
 
 /**

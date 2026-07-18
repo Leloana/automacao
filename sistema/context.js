@@ -138,6 +138,47 @@ ${anotacoes}`;
 }
 
 /**
+ * Extrai os campos estruturados de um .md de cliente JA LIDO (string).
+ *
+ * Captura o valor de um rotulo em UMA unica linha. Usamos [ \t]* (e nao \s*)
+ * de proposito: \s incluiria quebras de linha e, com um campo vazio, a captura
+ * "pularia" para a proxima linha (ex.: o marcador do escritorio). Tambem
+ * descartamos qualquer "##" que tenha vazado de arquivos corrompidos antigos.
+ *
+ * Os valores voltam EXATAMENTE como estao no arquivo (sem fallback) — quem
+ * chama decide o que fazer com campo vazio.
+ */
+function extrairPerfil(conteudo) {
+  const atual = conteudo || '';
+  const pegar = (re) => {
+    const m = atual.match(re);
+    if (!m) return '';
+    return m[1].split('##')[0].replace(/\r/g, '').trim();
+  };
+  return {
+    nomeDisplay: pegar(/^#[ \t]*(.+)$/m),
+    numero: pegar(/^Telefone:[ \t]*(.*)$/m),
+    apelido: pegar(/^Apelido:[ \t]*(.*)$/m),
+    areaInteresse: pegar(/^Área de interesse:[ \t]*(.*)$/m),
+    observacoes: pegar(/^Observações:[ \t]*(.*)$/m),
+  };
+}
+
+/**
+ * Le os campos estruturados da ficha de um cliente a partir do CAMINHO do .md.
+ *
+ * IMPORTANTE (sincronizacao): use esta funcao — e nunca readMarkdown — para
+ * montar o pacote de sync. readMarkdown devolve o arquivo INTEIRO, incluindo o
+ * bloco espelhado do outro PC; mandar isso de volta faria o espelho crescer em
+ * espiral a cada ciclo de sincronizacao. Os regexes acima leem so os campos
+ * proprios desta maquina (os do espelho tem o sufixo "(lá)" justamente para
+ * nao casarem aqui).
+ */
+function lerPerfilMd(arquivoMd) {
+  return extrairPerfil(readMarkdown(arquivoMd));
+}
+
+/**
  * Atualiza o .md do cliente com o perfil gerado pelo modelo (area de interesse
  * e observacoes), PRESERVANDO o cabecalho e as anotacoes manuais do escritorio.
  *
@@ -157,18 +198,11 @@ function atualizarMdCliente(arquivoMd, perfil = {}) {
 
   const atual = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf8') : '';
 
-  // Captura o valor de um rotulo em UMA unica linha. Usamos [ \t]* (e nao \s*)
-  // de proposito: \s incluiria quebras de linha e, com um campo vazio, a captura
-  // "pularia" para a proxima linha (ex.: o marcador do escritorio). Tambem
-  // descartamos qualquer "##" que tenha vazado de arquivos corrompidos antigos.
-  const pegar = (re) => {
-    const m = atual.match(re);
-    if (!m) return '';
-    return m[1].split('##')[0].replace(/\r/g, '').trim();
-  };
-  const nomeDisplay = perfil.nomeDisplay || pegar(/^#[ \t]*(.+)$/m) || perfil.numero || '';
-  const numero = perfil.numero || pegar(/^Telefone:[ \t]*(.*)$/m) || '';
-  const apelido = pegar(/^Apelido:[ \t]*(.*)$/m);
+  // Le o que ja esta no arquivo (mesmos regexes usados pelo sync — ver extrairPerfil).
+  const doArquivo = extrairPerfil(atual);
+  const nomeDisplay = perfil.nomeDisplay || doArquivo.nomeDisplay || perfil.numero || '';
+  const numero = perfil.numero || doArquivo.numero || '';
+  const apelido = doArquivo.apelido;
 
   // Os dois campos vivem em UMA linha cada no .md, e sao relidos pelos regexes
   // de linha unica acima. Um valor com quebra de linha truncaria o texto na
@@ -176,8 +210,8 @@ function atualizarMdCliente(arquivoMd, perfil = {}) {
   const umaLinha = (texto) => (texto || '').replace(/\s*\r?\n\s*/g, ' ').trim();
 
   // Mantem o valor antigo quando o novo vier vazio (nao apaga dados ja escritos).
-  const areaInteresse = umaLinha(perfil.areaInteresse) || pegar(/^Área de interesse:[ \t]*(.*)$/m);
-  const observacoes = umaLinha(perfil.observacoes) || pegar(/^Observações:[ \t]*(.*)$/m);
+  const areaInteresse = umaLinha(perfil.areaInteresse) || doArquivo.areaInteresse;
+  const observacoes = umaLinha(perfil.observacoes) || doArquivo.observacoes;
 
   // Preserva o que o escritorio escreveu: tudo apos a ULTIMA ocorrencia do
   // marcador. Usar lastIndexOf colapsa marcadores duplicados de arquivos que
@@ -205,4 +239,7 @@ function escreverMarkdown(filepath, conteudo) {
   return true;
 }
 
-module.exports = { readMarkdown, criarMdCliente, criarFichaCliente, atualizarMdCliente, escreverMarkdown };
+module.exports = {
+  readMarkdown, criarMdCliente, criarFichaCliente, atualizarMdCliente,
+  escreverMarkdown, lerPerfilMd,
+};

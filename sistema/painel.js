@@ -16,6 +16,11 @@ const escritorio = require('./escritorio');
 const apikey = require('./apikey');
 const db = require('./db');
 const avisos = require('./avisos');
+// Namespace (e nao desestruturado) porque 'lerConfig'/'salvarConfig' ja sao os
+// da whitelist acima — aqui sao as opcoes de funcionamento do bot.
+const config = require('./config');
+// Idem: 'sync' fica como namespace porque tambem expoe lerConfig/salvarConfig.
+const sync = require('./sync');
 
 // Instituicao usada ao cadastrar um cliente pelo painel (mesma logica do bot).
 const INSTITUICAO_PADRAO_ID = Number(process.env.INSTITUICAO_PADRAO_ID) || 1;
@@ -160,6 +165,8 @@ const HTML = `<!DOCTYPE html>
       <button class="nav-btn" data-target="sec-triagem"><span class="ic">📋</span><span class="lbl">O que anotar e perguntar</span></button>
       <button class="nav-btn" data-target="sec-mensagens"><span class="ic">✉️</span><span class="lbl">Mensagens de encaminhamento</span></button>
       <button class="nav-btn" data-target="sec-advogados"><span class="ic">⚖️</span><span class="lbl">Advogados</span></button>
+      <button class="nav-btn" data-target="sec-sync"><span class="ic">🔄</span><span class="lbl">Sincronizar</span><span class="nav-dot" id="nav-dot-sync" style="display:none"></span></button>
+      <button class="nav-btn" data-target="sec-opcoes"><span class="ic">⚙️</span><span class="lbl">Outras opções</span></button>
       <div class="nav-sep"></div>
       <button class="nav-btn nav-perigo" data-target="sec-liberar"><span class="ic">🚨</span><span class="lbl">Responder todo mundo</span><span class="nav-dot" id="nav-dot-liberar" style="display:none"></span></button>
     </nav>
@@ -365,6 +372,68 @@ Localização: Londrina, PR
     <p class="sub" style="margin-top:16px">Dica: o que estiver abaixo de <code>## Anotações do escritório</code> nunca é alterado pelo bot — bom lugar para suas notas. "Remover autorização" faz o bot parar de responder este número (o histórico é mantido).</p>
   </div>
 
+  <!-- Outras opcoes de funcionamento do bot (config.js) -->
+  <div class="card hidden" id="sec-opcoes">
+    <h2>Outras opções<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Ajustes de funcionamento do bot: quanto tempo ele espera antes de responder, quanto da conversa ele lembra e de quanto em quanto tempo avisa sobre vídeos/documentos. Tudo vale na hora, sem reiniciar.</span></span></h2>
+    <p class="sub">Ajustes finos de como o bot se comporta. As alterações valem <b>na hora</b>, sem reiniciar.</p>
+
+    <!-- 1) Tempo de espera (debounce) -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">⏱️ Tempo de espera antes de responder</div>
+      <p class="sub" style="margin:0 0 12px">As mensagens que chegam dentro desse tempo viram <b>uma única resposta</b> — assim o bot não responde frase por frase quando o cliente escreve em partes.</p>
+
+      <div class="field" style="max-width:280px">
+        <label>Esperar quanto tempo</label>
+        <input type="number" id="op-espera" min="5" max="600" step="1" oninput="previewEspera()" />
+      </div>
+      <p class="sub" id="op-espera-eq" style="margin:6px 0 4px">&nbsp;</p>
+      <p class="sub" style="margin:0 0 14px">Em segundos. Mínimo 5, máximo 600 (10 minutos).</p>
+
+      <div style="margin-bottom:6px;font-size:13px;color:#94a3b8">Contar esse tempo a partir de qual mensagem?</div>
+      <label class="ack" style="margin:0 0 8px">
+        <input type="radio" name="op-modo" value="ultima" onchange="previewEspera()" />
+        <span><b>Da última mensagem</b> (recomendado) — a contagem <b>reinicia</b> a cada mensagem nova. O bot responde depois que o cliente ficar esse tempo todo em silêncio.</span>
+      </label>
+      <label class="ack" style="margin:0 0 8px">
+        <input type="radio" name="op-modo" value="primeira" onchange="previewEspera()" />
+        <span><b>Da primeira mensagem</b> — a contagem começa na primeira mensagem do cliente e <b>não reinicia</b>. Serve para garantir um tempo fixo de acolhida sem que um cliente que escreve muito adie a resposta para sempre.</span>
+      </label>
+      <div id="op-aviso-primeira" class="banner b-carregando" style="display:none">
+        <span>ℹ️ Mesmo nesse modo, o bot <b>sempre</b> espera pelo menos <b>5 segundos</b> depois da última mensagem. Se o cliente escrever bem na hora em que o tempo acabaria, o bot aguarda mais 5 segundos em vez de responder sem ter lido.</span>
+      </div>
+      <div id="op-aviso-longo" class="banner b-carregando" style="display:none;border-color:#a16207;background:#2a2109;color:#fde68a">
+        <span>⚠️ Espera longa: o cliente fica <b>vários minutos</b> sem nenhum retorno e pode achar que ninguém viu a mensagem. O WhatsApp não mostra "digitando" nesse intervalo.</span>
+      </div>
+    </div>
+
+    <!-- 2) Memoria da conversa -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">🧠 Quanto o bot lembra da conversa</div>
+      <p class="sub" style="margin:0 0 12px">Quantas mensagens recentes o bot relê a cada resposta. Além disso, ele sempre mantém um <b>resumo do caso</b> na ficha do cliente (aba Clientes), que não se perde.</p>
+      <div class="field" style="max-width:280px">
+        <label>Mensagens lembradas</label>
+        <input type="number" id="op-historico" min="5" max="200" step="1" />
+      </div>
+      <p class="sub" style="margin:6px 0 0">Padrão 30 (cerca de 15 idas e voltas). Mínimo 5, máximo 200. Valores altos deixam o bot mais consistente em conversas longas e aumentam um pouco o custo por mensagem.</p>
+      <p class="sub" style="margin:6px 0 0"><b>Atenção:</b> o que passa desse limite é <b>apagado do banco</b> conforme a conversa avança. Diminuir esse número não apaga nada na hora, mas as mensagens antigas somem na próxima vez que o cliente escrever.</p>
+    </div>
+
+    <!-- 3) Cooldown do aviso de midia -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">🎥 Intervalo entre avisos de vídeo/documento</div>
+      <p class="sub" style="margin:0 0 12px">O bot não entende vídeo nem documento: ele avisa o cliente e alerta o escritório. Se o cliente mandar vários seguidos, esse intervalo evita repetir o aviso a cada arquivo.</p>
+      <div class="field" style="max-width:280px">
+        <label>Intervalo mínimo</label>
+        <input type="number" id="op-midia" min="0" max="3600" step="1" />
+      </div>
+      <p class="sub" style="margin:6px 0 0">Em segundos. Padrão 60. Use 0 para avisar sempre.</p>
+    </div>
+
+    <button class="btn-save" onclick="salvarOpcoes()">Salvar opções</button>
+    <button class="btn-reset" onclick="restaurarOpcoes()">Restaurar padrão</button>
+    <div class="status" id="status-opcoes"></div>
+  </div>
+
   <!-- Responder todo mundo (desliga a whitelist) — SECAO PERIGOSA -->
   <div class="card hidden" id="sec-liberar">
     <h2>Responder todo mundo<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Desliga a lista de autorização. Com isso o bot responde QUALQUER número que mandar mensagem, e não só os clientes cadastrados. Use com muito cuidado — o normal é deixar DESLIGADO.</span></span></h2>
@@ -406,6 +475,73 @@ Localização: Londrina, PR
     <p class="sub">Estes números <b>nunca</b> são respondidos pelo bot — nem quando o "responder todo mundo" está ligado. Um número entra aqui quando você clica em <b>"Remover autorização deste cliente"</b> na aba <b>Clientes</b>.</p>
     <div id="bloq-lista"><p class="sub">Carregando...</p></div>
     <div class="status" id="status-bloq"></div>
+  </div>
+
+  <!-- Sincronizacao entre os PCs do escritorio (sync.js) -->
+  <div class="card hidden" id="sec-sync">
+    <h2>Sincronizar com outro computador<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">Serve quando o escritório usa mais de um computador, cada um com um número de WhatsApp diferente, atendendo os mesmos clientes. Cada PC manda o que sabe para o site do escritório e busca o que o outro sabe. Não precisa que os dois estejam ligados ao mesmo tempo.</span></span></h2>
+    <p class="sub">Quando o escritório atende pelo <b>mesmo cliente em dois computadores</b> (números de WhatsApp diferentes), esta aba junta o que cada um sabe. Os dois <b>não</b> precisam estar ligados ao mesmo tempo.</p>
+
+    <div id="sync-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="sync-estado-txt">Carregando...</span></div>
+
+    <!-- 1) Identificacao desta maquina -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">🏷️ Qual é este computador</div>
+      <p class="sub" style="margin:0 0 12px">Um apelido curto, só letras minúsculas e sem espaço (ex.: <code>londrina</code>). É por ele que o outro PC reconhece os dados que vêm daqui. <b>Os dois computadores não podem ter o mesmo nome.</b></p>
+      <div class="field" style="max-width:280px">
+        <label>Nome deste computador</label>
+        <input type="text" id="sync-id" placeholder="londrina" onchange="salvarIdentidade()" />
+      </div>
+      <div class="field" style="max-width:380px">
+        <label>Como aparece para o outro PC (opcional)</label>
+        <input type="text" id="sync-rotulo" placeholder="PC de Londrina" onchange="salvarIdentidade()" />
+      </div>
+    </div>
+
+    <!-- 2) O outro computador -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">💻 Com qual computador sincronizar</div>
+      <p class="sub" style="margin:0 0 12px">Cadastre aqui o nome que foi dado ao <b>outro</b> PC (o mesmo que está no campo acima, na tela dele).</p>
+      <div id="sync-parceiros"></div>
+      <div class="add">
+        <input type="text" id="sync-novo-id" placeholder="taquarituba" />
+        <input type="text" id="sync-novo-rotulo" placeholder="PC de Taquarituba (opcional)" />
+        <button class="btn-add" onclick="addParceiro()">+ Adicionar</button>
+      </div>
+    </div>
+
+    <!-- 3) O que sincronizar -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">📦 O que enviar e receber</div>
+      <p class="sub" style="margin:0 0 12px">Marque só o que faz sentido compartilhar. <b>As chaves da API nunca são enviadas</b>, em nenhuma opção.</p>
+      <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-clientes" onchange="salvarCategorias()" /><span><b>Fichas dos clientes</b> — o que cada cliente já contou (área do caso, observações e um resumo do atendimento recente).</span></label>
+      <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-whitelist" onchange="salvarCategorias()" /><span><b>Clientes autorizados</b> — as duas listas são <b>somadas</b>, nunca apagadas. Quem você bloqueou também passa a ser bloqueado no outro PC.</span></label>
+      <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-advogados" onchange="salvarCategorias()" /><span><b>Advogados</b> — a lista de quem recebe cada área.</span></label>
+      <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-mensagens" onchange="salvarCategorias()" /><span><b>Mensagens de encaminhamento</b> — os textos enviados ao cliente e ao advogado.</span></label>
+      <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-triagem" onchange="salvarCategorias()" /><span><b>O que anotar e perguntar</b> — as duas listas da triagem.</span></label>
+      <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-personalidade" onchange="salvarCategorias()" /><span><b>Personalidade</b> — o tom e o estilo do bot.</span></label>
+      <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-escritorio" onchange="salvarCategorias()" /><span><b>Dados do escritório</b> — áreas atendidas, horário, endereço e orientações.</span></label>
+    </div>
+
+    <!-- 4) Sincronizar -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">🔐 Sincronizar agora</div>
+      <p class="sub" style="margin:0 0 12px">A senha é a <b>mesma nos dois computadores</b> — foi definida quando o site do escritório foi preparado. Ela não fica guardada nesta tela.</p>
+      <div class="field" style="max-width:280px">
+        <label>Senha da sincronização</label>
+        <input type="password" id="sync-senha" placeholder="senha combinada" />
+      </div>
+      <button class="btn-save" id="btn-sync" onclick="sincronizarAgora()">Sincronizar agora</button>
+      <div class="status" id="status-sync"></div>
+    </div>
+
+    <div id="sync-ultimo" class="banner b-carregando" style="display:none"></div>
+
+    <div class="banner b-carregando" style="border-color:#a16207;background:#2a2109;color:#fde68a;margin-top:16px">
+      <span>ℹ️ <b>Nesta versão a sincronização ainda não altera nada neste computador.</b> Ela envia o que você tem e mostra o que o outro PC enviou, para você conferir que a ligação entre os dois está funcionando. A aplicação dos dados entra na próxima etapa.</span>
+    </div>
+
+    <p class="sub" style="margin-top:16px"><b>Atenção:</b> isto sincroniza o que o escritório <b>sabe</b> sobre os clientes — não a conta do WhatsApp nem as conversas em si. Cada computador continua com o seu próprio número e precisa do seu próprio QR code.</p>
   </div>
     </main>
   </div>
@@ -957,6 +1093,83 @@ Localização: Londrina, PR
     } catch (e) { setStatusAvisos('Erro ao limpar: ' + e.message, false); }
   }
 
+  // ---- Outras opcoes de funcionamento (config.js) ----
+  function setStatusOpcoes(msg, ok){
+    const s = document.getElementById('status-opcoes');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  // Traduz segundos para uma frase que a pessoa entende ("5 minutos").
+  function emPortugues(seg){
+    if (seg < 60) return seg + ' segundo' + (seg === 1 ? '' : 's');
+    const min = Math.floor(seg / 60), resto = seg % 60;
+    const partes = [min + ' minuto' + (min === 1 ? '' : 's')];
+    if (resto) partes.push(resto + 's');
+    return partes.join(' e ');
+  }
+  function modoEsperaSelecionado(){
+    const m = document.querySelector('input[name="op-modo"]:checked');
+    return m ? m.value : 'ultima';
+  }
+  // Mostra em texto o que a configuracao atual significa na pratica, e liga os
+  // avisos (piso de 5s no modo "primeira"; espera longa em qualquer modo).
+  function previewEspera(){
+    const seg = Number(document.getElementById('op-espera').value) || 0;
+    const modo = modoEsperaSelecionado();
+    const eq = document.getElementById('op-espera-eq');
+    if (seg >= 5) {
+      eq.innerHTML = modo === 'primeira'
+        ? '➜ O bot responde <b>' + emPortugues(seg) + '</b> depois da <b>primeira</b> mensagem do cliente (aguardando 5s a mais se ele ainda estiver escrevendo).'
+        : '➜ O bot responde depois de <b>' + emPortugues(seg) + '</b> sem o cliente mandar nada.';
+    } else {
+      eq.innerHTML = '&nbsp;';
+    }
+    document.getElementById('op-aviso-primeira').style.display = modo === 'primeira' ? 'flex' : 'none';
+    document.getElementById('op-aviso-longo').style.display = seg > 60 ? 'flex' : 'none';
+  }
+  function renderOpcoes(c){
+    document.getElementById('op-espera').value = Math.round(c.esperaMs / 1000);
+    document.getElementById('op-historico').value = c.historicoLimite;
+    document.getElementById('op-midia').value = Math.round(c.midiaCooldownMs / 1000);
+    const radio = document.querySelector('input[name="op-modo"][value="' + (c.esperaModo || 'ultima') + '"]');
+    if (radio) radio.checked = true;
+    previewEspera();
+  }
+  async function carregarOpcoes(){
+    try {
+      const r = await fetch('/api/config');
+      const d = await r.json();
+      if (d.erro) return setStatusOpcoes('Erro: ' + d.erro, false);
+      renderOpcoes(d.config);
+    } catch (e) { setStatusOpcoes('Erro ao carregar: ' + e.message, false); }
+  }
+  async function salvarOpcoes(){
+    const payload = {
+      esperaMs: (Number(document.getElementById('op-espera').value) || 0) * 1000,
+      esperaModo: modoEsperaSelecionado(),
+      historicoLimite: Number(document.getElementById('op-historico').value) || 0,
+      midiaCooldownMs: (Number(document.getElementById('op-midia').value) || 0) * 1000,
+    };
+    try {
+      const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const d = await r.json();
+      if (d.erro) return setStatusOpcoes('Erro: ' + d.erro, false);
+      // O servidor aplica os limites; redesenha com o que ficou valendo de fato
+      // e avisa se algum valor foi ajustado, em vez de fingir que salvou tudo.
+      renderOpcoes(d);
+      const ajustou = d.esperaMs !== payload.esperaMs
+        || d.historicoLimite !== payload.historicoLimite
+        || d.midiaCooldownMs !== payload.midiaCooldownMs;
+      setStatusOpcoes(ajustou
+        ? 'Salvo, mas algum valor estava fora do limite permitido e foi ajustado — confira os campos acima.'
+        : 'Opções salvas! Já valem para as próximas mensagens.', true);
+    } catch (e) { setStatusOpcoes('Erro ao salvar: ' + e.message, false); }
+  }
+  async function restaurarOpcoes(){
+    if (!confirm('Restaurar as opções padrão? (esperar 5 segundos contados da última mensagem, lembrar 30 mensagens, avisar sobre vídeo/documento no máximo 1 vez por minuto)')) return;
+    renderOpcoes({ esperaMs: 5000, esperaModo: 'ultima', historicoLimite: 30, midiaCooldownMs: 60000 });
+    salvarOpcoes();
+  }
+
   // ---- Responder todo mundo (desliga a whitelist) — SECAO PERIGOSA ----
   function setStatusLiberar(msg, ok){
     const s = document.getElementById('status-liberar');
@@ -1071,6 +1284,158 @@ Localização: Londrina, PR
     } catch (e) { setStatusBloq('Erro ao desbloquear: ' + e.message, false); }
   }
 
+  // ---- Sincronizacao entre os PCs do escritorio ----
+  var syncCfg = { id:'', rotulo:'', parceiros:[], categorias:{} };
+  var CATS = ['clientes','whitelist','advogados','mensagens','triagem','personalidade','escritorio'];
+
+  function setStatusSync(msg, ok){
+    const s = document.getElementById('status-sync');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  function renderParceiros(){
+    const box = document.getElementById('sync-parceiros');
+    box.innerHTML = '';
+    if (!syncCfg.parceiros.length) {
+      box.innerHTML = '<p class="sub">Nenhum outro computador cadastrado ainda.</p>';
+      return;
+    }
+    syncCfg.parceiros.forEach((p, i) => {
+      const div = document.createElement('div');
+      div.className = 'checks';
+      div.innerHTML = '<span style="flex:1"><b>' + esc(p.rotulo || p.id) + '</b> <span class="sub">(' + esc(p.id) + ')</span></span>' +
+        '<button class="btn-rem" data-rem-parc="' + i + '">Remover</button>';
+      box.appendChild(div);
+    });
+    box.querySelectorAll('[data-rem-parc]').forEach((b) => {
+      b.addEventListener('click', () => removerParceiro(Number(b.getAttribute('data-rem-parc'))));
+    });
+  }
+  async function carregarSync(){
+    try {
+      const r = await fetch('/api/sync');
+      const d = await r.json();
+      if (d.erro) return;
+      syncCfg = d;
+      // Nao sobrescreve o que o usuario esta digitando neste instante.
+      const idEl = document.getElementById('sync-id');
+      const rotEl = document.getElementById('sync-rotulo');
+      if (document.activeElement !== idEl) idEl.value = d.id || '';
+      if (document.activeElement !== rotEl) rotEl.value = d.rotulo || '';
+      CATS.forEach((c) => { document.getElementById('cat-' + c).checked = !!(d.categorias || {})[c]; });
+      renderParceiros();
+      atualizarEstadoSync(d);
+    } catch (e) { /* silencioso: a aba faz poll */ }
+  }
+  function atualizarEstadoSync(d){
+    const est = document.getElementById('sync-estado');
+    const txt = document.getElementById('sync-estado-txt');
+    const dot = document.getElementById('nav-dot-sync');
+    if (d.rodando) {
+      est.className = 'banner b-carregando';
+      txt.textContent = 'Sincronizando...';
+    } else if (!d.servidorConfigurado) {
+      est.className = 'banner b-qr';
+      txt.textContent = 'O endereço do servidor ainda não foi configurado neste computador.';
+    } else if (!d.id) {
+      est.className = 'banner b-qr';
+      txt.textContent = 'Dê um nome a este computador para começar.';
+    } else if (!syncCfg.parceiros.length) {
+      est.className = 'banner b-qr';
+      txt.textContent = 'Cadastre o outro computador para poder sincronizar.';
+    } else if (d.ultimo && d.ultimo.erro) {
+      est.className = 'banner b-falha';
+      txt.textContent = d.ultimo.erro;
+    } else if (d.ultimo && d.ultimo.envio) {
+      est.className = 'banner b-conectado';
+      txt.textContent = 'Pronto para sincronizar. Última vez: ' + quando(d.ultimo.envio) + '.';
+    } else {
+      est.className = 'banner b-carregando';
+      txt.textContent = 'Pronto para sincronizar. Ainda não foi feita nenhuma vez.';
+    }
+    if (dot) dot.style.display = (d.ultimo && d.ultimo.erro) ? 'inline-block' : 'none';
+
+    const box = document.getElementById('sync-ultimo');
+    const res = (d.ultimo && d.ultimo.resumo) || {};
+    if (res.enviados === undefined) { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    box.className = 'banner b-conectado';
+    let t = '✅ Enviei ' + res.enviados + ' ficha(s) de cliente deste computador. ';
+    if (res.vazio) t += 'O outro computador (' + esc(res.origem || '') + ') ainda não enviou nada.';
+    else t += 'Recebi ' + res.recebidos + ' ficha(s) de ' + esc(res.origem || '') + (res.geradoEm ? ', de ' + quando(res.geradoEm) : '') + '.';
+    box.innerHTML = '<span>' + t + '</span>';
+  }
+  function quando(iso){
+    try {
+      const d = new Date(iso);
+      const p = (n) => String(n).padStart(2, '0');
+      return p(d.getDate()) + '/' + p(d.getMonth()+1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    } catch (e) { return iso; }
+  }
+  async function salvarSync(parcial, msgOk){
+    try {
+      const r = await fetch('/api/sync/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parcial) });
+      const d = await r.json();
+      if (d.erro) return setStatusSync('Erro: ' + d.erro, false);
+      syncCfg = d;
+      renderParceiros();
+      atualizarEstadoSync(d);
+      if (msgOk) setStatusSync(msgOk, true);
+    } catch (e) { setStatusSync('Erro ao salvar: ' + e.message, false); }
+  }
+  function salvarIdentidade(){
+    const id = document.getElementById('sync-id').value.trim().toLowerCase();
+    const rotulo = document.getElementById('sync-rotulo').value.trim();
+    document.getElementById('sync-id').value = id;
+    salvarSync({ id, rotulo }, 'Salvo.');
+  }
+  function addParceiro(){
+    const id = document.getElementById('sync-novo-id').value.trim().toLowerCase();
+    const rotulo = document.getElementById('sync-novo-rotulo').value.trim();
+    if (!id) return setStatusSync('Informe o nome do outro computador.', false);
+    if (id === (syncCfg.id || '')) return setStatusSync('Esse é o nome DESTE computador. Use o nome do outro.', false);
+    if (syncCfg.parceiros.some((p) => p.id === id)) return setStatusSync('Esse computador já está cadastrado.', false);
+    document.getElementById('sync-novo-id').value = '';
+    document.getElementById('sync-novo-rotulo').value = '';
+    salvarSync({ parceiros: syncCfg.parceiros.concat([{ id, rotulo: rotulo || id }]) }, 'Computador cadastrado.');
+  }
+  function removerParceiro(i){
+    salvarSync({ parceiros: syncCfg.parceiros.filter((_, k) => k !== i) }, 'Computador removido.');
+  }
+  function salvarCategorias(){
+    const categorias = {};
+    CATS.forEach((c) => { categorias[c] = document.getElementById('cat-' + c).checked; });
+    salvarSync({ categorias }, 'Salvo.');
+  }
+  async function sincronizarAgora(){
+    const senha = document.getElementById('sync-senha').value;
+    const parceiro = syncCfg.parceiros[0];
+    if (!parceiro) return setStatusSync('Cadastre o outro computador antes de sincronizar.', false);
+    const btn = document.getElementById('btn-sync');
+    btn.disabled = true;
+    setStatusSync('Sincronizando...', true);
+    try {
+      // Dispara em segundo plano: a resposta volta na hora e o resultado real
+      // chega pelo poll de carregarSync (um sync pode levar dezenas de segundos).
+      const r = await fetch('/api/sync/agora', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maquina: parceiro.id, senha }) });
+      const d = await r.json();
+      if (d.erro) { setStatusSync('Erro: ' + d.erro, false); btn.disabled = false; return; }
+      setStatusSync('Sincronização iniciada. O resultado aparece aqui em instantes.', true);
+      // Reabilita quando o sync terminar (o poll atualiza "rodando").
+      const timer = setInterval(async () => {
+        try {
+          const e = await (await fetch('/api/sync/estado')).json();
+          if (!e.rodando) {
+            clearInterval(timer);
+            btn.disabled = false;
+            await carregarSync();
+            const err = e.ultimo && e.ultimo.erro;
+            setStatusSync(err ? err : 'Sincronização concluída.', !err);
+          }
+        } catch (x) { clearInterval(timer); btn.disabled = false; }
+      }, 1500);
+    } catch (e) { setStatusSync('Erro: ' + e.message, false); btn.disabled = false; }
+  }
+
   // ---- Navegacao lateral: mostra uma secao (card) por vez ----
   function mostrarSecao(id){
     document.querySelectorAll('.content > .card').forEach((s) => s.classList.toggle('hidden', s.id !== id));
@@ -1093,6 +1458,8 @@ Localização: Londrina, PR
   carregarAvisos();
   carregarLiberar();
   carregarBloqueados();
+  carregarOpcoes();
+  carregarSync();
   atualizarStatus();
   setInterval(atualizarStatus, 2500); // verifica a conexao a cada 2,5s
   setInterval(carregarAvisos, 5000); // atualiza o contador de avisos
@@ -1262,6 +1629,22 @@ function iniciarPainel(porta = 3000) {
       });
     }
 
+    // Ler as opcoes de funcionamento do bot (aba "Outras opcoes"). Devolve
+    // tambem os limites, para a tela validar com as mesmas regras do servidor.
+    if (req.method === 'GET' && req.url === '/api/config') {
+      return enviarJson(res, 200, {
+        config: config.lerConfig(),
+        limites: config.OPCOES,
+        minSilencioMs: config.MIN_SILENCIO_MS,
+      });
+    }
+
+    // Salvar as opcoes. Vale na hora (config.js e lido a cada uso); o retorno
+    // traz o que ficou valendo de fato, ja com os limites aplicados.
+    if (req.method === 'POST' && req.url === '/api/config') {
+      return lerCorpo(req, res, (corpo) => config.salvarConfig(corpo));
+    }
+
     // Ler os dados do escritorio (areas atendidas + descricao) do .md da instituicao.
     if (req.method === 'GET' && req.url === '/api/escritorio') {
       try {
@@ -1393,6 +1776,64 @@ function iniciarPainel(porta = 3000) {
         .then(() => trocarHandler())
         .catch((e) => console.error('Erro ao trocar de WhatsApp:', e.message));
       return enviarJson(res, 200, { ok: true });
+    }
+
+    // ---- Sincronizacao entre os PCs do escritorio (sync.js) ----
+
+    // Configuracao + estado. NUNCA devolve a senha/token: o painel so a envia.
+    if (req.method === 'GET' && req.url === '/api/sync') {
+      const cfg = sync.lerConfig();
+      const est = sync.estado();
+      return enviarJson(res, 200, {
+        ...cfg,
+        rodando: est.rodando,
+        pendentes: est.pendentes,
+        // Serve so para a tela explicar o que falta configurar.
+        servidorConfigurado: !!String(process.env.SYNC_URL || '').trim(),
+      });
+    }
+
+    if (req.method === 'POST' && req.url === '/api/sync/config') {
+      return lerCorpo(req, res, (corpo) => {
+        const parcial = {};
+        if (corpo.id !== undefined) {
+          const id = String(corpo.id).trim().toLowerCase();
+          // Mesmo formato aceito pelo sync.php (vira nome de arquivo la).
+          if (id && !/^[a-z0-9_-]{1,32}$/.test(id)) {
+            throw new Error('O nome do computador só pode ter letras minúsculas, números, "-" e "_" (até 32 caracteres).');
+          }
+          parcial.id = id;
+        }
+        if (corpo.rotulo !== undefined) parcial.rotulo = String(corpo.rotulo).trim();
+        if (Array.isArray(corpo.parceiros)) {
+          parcial.parceiros = corpo.parceiros
+            .filter((p) => p && p.id && /^[a-z0-9_-]{1,32}$/.test(String(p.id).trim().toLowerCase()))
+            .map((p) => ({ id: String(p.id).trim().toLowerCase(), rotulo: String(p.rotulo || p.id).trim() }));
+        }
+        if (corpo.categorias && typeof corpo.categorias === 'object') parcial.categorias = corpo.categorias;
+        if (corpo.modoImportacao !== undefined) parcial.modoImportacao = corpo.modoImportacao;
+        if (corpo.criarClientesNovos !== undefined) parcial.criarClientesNovos = corpo.criarClientesNovos === true;
+        if (corpo.autoMinutos !== undefined) parcial.autoMinutos = Number(corpo.autoMinutos) || 0;
+
+        const salvo = sync.salvarConfig(parcial);
+        return { ...salvo, servidorConfigurado: !!String(process.env.SYNC_URL || '').trim() };
+      });
+    }
+
+    // Dispara em segundo plano e responde na hora. lerCorpo e SINCRONO: se
+    // devolvesse a Promise, o painel serializaria {} e mostraria um sucesso
+    // instantaneo e falso. O resultado real e acompanhado por /api/sync/estado.
+    if (req.method === 'POST' && req.url === '/api/sync/agora') {
+      return lerCorpo(req, res, (corpo) => {
+        Promise.resolve()
+          .then(() => sync.sincronizarAgora({ maquina: corpo.maquina, senha: corpo.senha }))
+          .catch((e) => console.error('Erro nao tratado na sincronizacao:', e.message));
+        return { ok: true, iniciado: true };
+      });
+    }
+
+    if (req.method === 'GET' && req.url === '/api/sync/estado') {
+      return enviarJson(res, 200, sync.estado());
     }
 
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });

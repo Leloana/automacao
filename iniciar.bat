@@ -5,6 +5,39 @@ title Bot Juridico WhatsApp - Ferreira Ramos
 rem %~dp0 e a pasta deste .bat (raiz do projeto, com o .git e a pasta sistema).
 cd /d "%~dp0"
 
+rem ============================================================
+rem DESLIGA O "MODO DE EDICAO RAPIDA" DO CONSOLE. NAO REMOVA.
+rem Com ele ligado (padrao do Windows), UM CLIQUE dentro desta janela preta
+rem entra em modo de selecao e CONGELA o processo inteiro no primeiro
+rem console.log: sem erro, sem crash, sem nada no log. O bot fica de pe
+rem aparentemente, mas nao le mais nenhuma mensagem. Em 18/07/2026 isso deixou
+rem o escritorio 5h30 sem atendimento e nao havia UMA linha de erro para
+rem explicar. Basta esbarrar o mouse ou clicar na janela para "acordar" o PC.
+rem
+rem ATENCAO ao mexer aqui: gravar a chave NAO conserta esta janela. O Windows le
+rem a configuracao do console quando a JANELA NASCE, entao a correcao so vale a
+rem partir da proxima. Por isso, quando precisamos mudar a chave, RELANCAMOS o
+rem .bat uma vez: a janela nova ja nasce sem a Edicao Rapida. Sem esse relance,
+rem o primeiro uso em um PC novo continuaria vulneravel justamente ao bug.
+rem
+rem O relance acontece UMA vez so: na proxima abertura a chave ja esta 0x0 e o
+rem bloco inteiro e pulado. A variavel CONSOLE_OK e um cinto de seguranca contra
+rem loop de relance caso a gravacao da chave falhe (ex.: politica da empresa) -
+rem nesse caso seguimos assim mesmo, sem travar o inicio do bot.
+rem ============================================================
+if not defined CONSOLE_OK (
+  set "QE="
+  for /f "tokens=3" %%q in ('reg query "HKCU\Console" /v QuickEdit 2^>nul ^| findstr /I /C:"QuickEdit"') do set "QE=%%q"
+  if /I not "!QE!"=="0x0" (
+    echo Ajustando a configuracao da janela para o bot nao travar...
+    reg add "HKCU\Console" /v QuickEdit /t REG_DWORD /d 0 /f >nul 2>nul
+    set "CONSOLE_OK=1"
+    start "" "%~f0" %*
+    exit /b 0
+  )
+)
+set "CONSOLE_OK=1"
+
 echo ============================================
 echo   Bot Juridico WhatsApp - Ferreira Ramos
 echo ============================================
@@ -331,6 +364,16 @@ rem "Singleton*" para tras e o proximo boot falha com "browser already running".
 rem E seguro apagar aqui: o guard no inicio ja garantiu que nao ha outra
 rem instancia do bot rodando.
 del /s /q "data\sessions\SingletonLock" "data\sessions\SingletonCookie" "data\sessions\SingletonSocket" >nul 2>nul
+
+rem ============================================================
+rem 4.1) Vigia (watchdog): reinicia o bot se ele CONGELAR — processo de pe, mas
+rem      sem responder e sem ler mensagem nenhuma. Roda escondido, em segundo
+rem      plano, e SE ENCERRA sozinho quando o bot e fechado de proposito (ele so
+rem      reage a travamento, nunca a ausencia do processo). Ver watchdog.ps1.
+rem ============================================================
+if exist "%~dp0watchdog.ps1" (
+  start "" /min powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%~dp0watchdog.ps1"
+)
 
 rem ============================================================
 rem 5) Inicia o bot.

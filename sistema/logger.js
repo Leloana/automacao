@@ -55,10 +55,18 @@ function escrever(nivel, args) {
 }
 
 // Mantem o comportamento original do console e adiciona a gravacao em arquivo.
+//
+// ⚠️ A ORDEM IMPORTA: grava no ARQUIVO primeiro, no console depois. Escrever no
+// console do Windows pode BLOQUEAR (ver watchdog.ps1: o "Modo de Edicao Rapida"
+// congela o processo enquanto ha texto selecionado na janela). Com o console
+// primeiro, a linha travava antes de chegar no arquivo e o log simplesmente
+// parava, sem deixar pista da hora nem do ponto em que travou — foi assim que
+// perdemos 5h de atendimento em 18/07/2026 sem nenhum erro registrado.
+// Invertida, a ultima linha do log.txt passa a ser exatamente onde o bot parou.
 const original = { log: console.log, warn: console.warn, error: console.error };
-console.log = (...a) => { original.log(...a); escrever('INFO', a); };
-console.warn = (...a) => { original.warn(...a); escrever('AVISO', a); };
-console.error = (...a) => { original.error(...a); escrever('ERRO', a); };
+console.log = (...a) => { escrever('INFO', a); original.log(...a); };
+console.warn = (...a) => { escrever('AVISO', a); original.warn(...a); };
+console.error = (...a) => { escrever('ERRO', a); original.error(...a); };
 
 // Captura erros que escapariam e derrubariam o processo silenciosamente.
 process.on('uncaughtException', (err) => {
@@ -79,5 +87,19 @@ process.on('unhandledRejection', (motivo) => {
 });
 
 console.log('===== Log iniciado =====');
+
+// Batimento de vida: a cada 5 minutos registra que o bot ainda esta processando.
+// Usa escrever() DIRETO, sem passar pelo console — o objetivo e justamente
+// sobreviver a um console travado (ver comentario acima). E como o setInterval
+// depende do event loop, um bot congelado para de bater: a hora do ultimo
+// "[VIVO]" no log.txt e a hora em que ele travou. Sem isso, um travamento fica
+// indistinguivel de "nao chegou mensagem nenhuma nesse periodo".
+const INTERVALO_VIVO_MS = 5 * 60 * 1000;
+const batimento = setInterval(() => {
+  const min = Math.round(process.uptime() / 60);
+  escrever('INFO', [`[VIVO] bot ativo ha ${min} min`]);
+}, INTERVALO_VIVO_MS);
+// Nao segura o processo aberto so por causa do timer.
+batimento.unref();
 
 module.exports = { LOG_PATH };

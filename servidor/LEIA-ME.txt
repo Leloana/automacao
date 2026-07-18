@@ -1,0 +1,96 @@
+COMO INSTALAR A SINCRONIZACAO NO SITE DO ESCRITORIO
+===================================================
+
+Isto e feito UMA VEZ SO, por quem tem acesso ao site (FTP ou painel da
+hospedagem). Depois disso, os dois computadores sincronizam sozinhos pelo
+painel do bot.
+
+O que estes arquivos fazem: servem de "caixa-postal". Cada computador deixa
+la o que sabe e pega o que o outro deixou. Por isso os dois NUNCA precisam
+estar ligados ao mesmo tempo.
+
+
+PASSO 1 — Escolher uma senha
+----------------------------
+Invente uma senha longa (30 caracteres ou mais, letras e numeros misturados).
+Ela vai ser digitada nos DOIS computadores, entao guarde em lugar seguro.
+
+Exemplo de senha boa:  7fK2mQx9Lp4RtY8vN3wZ6bH1sD5gJ0cA
+
+
+PASSO 2 — Criar o arquivo sync_config.php
+-----------------------------------------
+Crie um arquivo chamado  sync_config.php  com exatamente este conteudo
+(trocando a senha pela sua):
+
+    <?php
+    define('SYNC_TOKEN', 'COLE_AQUI_A_SENHA_QUE_VOCE_ESCOLHEU');
+
+
+PASSO 3 — Subir os arquivos
+---------------------------
+Suba para a MESMA pasta onde ja estao o clientes.php e o processos.php
+(normalmente  /api  no site):
+
+    sync.php
+    sync_config.php
+
+Nao precisa criar a pasta "sync": o proprio sync.php cria na primeira vez.
+
+
+PASSO 4 — Proteger a pasta dos dados  (IMPORTANTE)
+--------------------------------------------------
+A pasta  /api/sync  vai guardar as fichas dos clientes. Ela NAO pode ser
+acessivel pelo navegador.
+
+Crie um arquivo chamado  .htaccess  DENTRO da pasta  /api/sync  com este
+conteudo:
+
+    Require all denied
+
+Se o servidor for antigo (Apache 2.2), use no lugar:
+
+    Order allow,deny
+    Deny from all
+
+
+PASSO 5 — Conferir que ficou seguro
+-----------------------------------
+Abra no navegador:
+
+    https://ferreiraramos.adv.br/api/sync.php?acao=listar
+
+Deve aparecer:   {"erro":"senha_invalida"}
+Isso e o correto — significa que sem a senha ninguem entra.
+
+Agora, depois que os computadores tiverem sincronizado pelo menos uma vez,
+abra:
+
+    https://ferreiraramos.adv.br/api/sync/londrina.json
+
+Tem que dar ERRO 403 (proibido).
+SE O ARQUIVO BAIXAR, PARE TUDO: o passo 4 nao funcionou e os dados dos
+clientes estao expostos na internet. Refaca o passo 4 antes de continuar.
+
+
+PASSO 6 — Configurar os dois computadores
+-----------------------------------------
+Em CADA computador, abra o arquivo  sistema/.env  e acrescente:
+
+    SYNC_URL=https://ferreiraramos.adv.br/api/sync.php
+
+Depois, no painel do bot, aba "Sincronizar":
+  - de um nome a cada computador (ex.: "londrina" num, "taquarituba" no outro)
+    ATENCAO: os nomes tem que ser DIFERENTES entre si;
+  - cadastre o nome do OUTRO computador;
+  - marque o que voce quer compartilhar;
+  - digite a senha do passo 1 e clique em "Sincronizar agora".
+
+
+SOBRE A SENHA
+-------------
+A senha nao fica guardada no painel: e digitada a cada sincronizacao.
+Se um dia voce quiser que a sincronizacao aconteca sozinha, de tempos em
+tempos, ai sim ela precisa ficar salva no  sistema/.env  de cada PC:
+
+    SYNC_TOKEN=a_mesma_senha_do_passo_1

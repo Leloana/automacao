@@ -1,0 +1,25 @@
+{
+  "id": "londrina",
+  "rotulo": "PC de Londrina",
+  "parceiros": [
+    { "id": "taquarituba", "rotulo": "PC de Taquarituba" }
+  ],
+  "categorias": {
+    "clientes": true,
+    "whitelist": true,
+    "advogados": true,
+    "mensagens": false,
+    "triagem": false,
+    "personalidade": false,
+    "escritorio": false
+  },
+  "modoImportacao": "externo",
+  "criarClientesNovos": false,
+  "autoMinutos": 0,
+  "ultimo": {
+    "envio": "",
+    "recebimento": "",
+    "erro": "",
+    "resumo": {}
+  }
+}
