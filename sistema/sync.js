@@ -26,13 +26,18 @@ const path = require('path');
 
 const db = require('./db');
 const avisos = require('./avisos');
-const { lerPerfilMd } = require('./context');
+const {
+  lerPerfilMd, aplicarEspelho, lerEspelho, atualizarMdCliente, criarMdCliente,
+} = require('./context');
 const whitelist = require('./whitelist');
 const advogados = require('./advogados');
 const mensagens = require('./mensagens');
 const triagem = require('./triagem');
 const escritorio = require('./escritorio');
-const { getPersonalidade } = require('./prompt');
+const { getPersonalidade, salvarPersonalidade } = require('./prompt');
+
+// Instituicao usada ao criar cliente vindo do outro PC (mesma logica do painel).
+const INSTITUICAO_PADRAO_ID = Number(process.env.INSTITUICAO_PADRAO_ID) || 1;
 
 const CONFIG_PATH = path.join(__dirname, 'sync.json');
 
@@ -213,6 +218,204 @@ function montarPacote(categorias) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Aplicacao do pacote recebido                                        */
+/* ------------------------------------------------------------------ */
+
+/** Acha o cliente local correspondente a uma chave, tolerando o "9" do celular. */
+function acharClienteLocal(chave) {
+  for (const v of whitelist.variantes(whitelist.soDigitos(chave))) {
+    const c = db.getClienteByNumero(v);
+    if (c) return c;
+  }
+  return null;
+}
+
+/** Garante que o cliente tenha ficha .md; devolve o caminho relativo. */
+function garantirFicha(cliente) {
+  if (cliente.arquivo_md) return cliente.arquivo_md;
+  const rel = criarMdCliente(cliente.numero_telefone, cliente.nome_display || cliente.numero_telefone);
+  db.setClienteArquivoMd(cliente.id, rel);
+  return rel;
+}
+
+/**
+ * Aplica um cliente recebido no modo INTERNO: o dado do outro PC vira dado
+ * NOSSO e o bloco espelho some. E irreversivel — so acontece por escolha
+ * explicita (modo "interno" ou botao "Internalizar" no painel).
+ *
+ * Uma regra so, que serve aos dois cenarios:
+ *  - ficha local VAZIA (migracao de PC) -> adota limpo, sem marca de origem:
+ *    o resultado fica identico a ficha da maquina de origem;
+ *  - ficha local COM conteudo (mesmo cliente atendido nos dois numeros) ->
+ *    junta, marcando a origem, sem apagar nada do que era nosso.
+ */
+function internalizarCliente(cliente, remoto, rotuloOrigem) {
+  const arquivo = garantirFicha(cliente);
+  const local = lerPerfilMd(arquivo);
+
+  const area = umaLinha(remoto.area_interesse);
+  const obs = umaLinha(remoto.observacoes);
+  const marca = rotuloOrigem ? `(do atendimento de ${rotuloOrigem})` : '(do outro atendimento)';
+
+  // Observacoes vivem em UMA linha no .md (relidas por regex de linha unica):
+  // por isso juntamos com separador, nunca com quebra de linha.
+  let novasObs = local.observacoes;
+  if (obs && obs !== local.observacoes) {
+    novasObs = local.observacoes ? `${local.observacoes} ${marca}: ${obs}` : obs;
+  }
+  const novaArea = local.areaInteresse || area;
+
+  atualizarMdCliente(arquivo, { areaInteresse: novaArea, observacoes: umaLinha(novasObs) });
+  // O dado agora e nosso: o espelho perde a razao de existir.
+  aplicarEspelho(arquivo, {});
+  return true;
+}
+
+/**
+ * Aplica o pacote recebido do outro PC.
+ *
+ * "Espelho, nao fusao": no modo externo (padrao) NADA local e sobrescrito — o
+ * que vem de fora entra num bloco marcado que o bot le e nunca escreve.
+ * Sincrono: better-sqlite3 e sincrono e nao ha rede aqui.
+ */
+function aplicarPacote(pacote, categorias) {
+  const cfg = lerConfig();
+  const quais = categorias || cfg.categorias;
+  const recebido = (pacote && pacote.categorias) || {};
+  const origem = (pacote && pacote.origem && pacote.origem.rotulo) || 'outro computador';
+  const recebidoEm = new Date().toISOString();
+  const resultado = { clientes: { atualizados: 0, criados: 0, pendentes: [] }, categorias: [] };
+
+  // ---- clientes ----
+  if (quais.clientes && Array.isArray(recebido.clientes)) {
+    const interno = cfg.modoImportacao === 'interno';
+    for (const r of recebido.clientes) {
+      if (!r || !r.chave) continue;
+      let cliente = acharClienteLocal(r.chave);
+
+      if (!cliente) {
+        // Cliente que existe la e nao aqui. Por padrao NAO criamos nem
+        // autorizamos: autorizar um numero e decisao local e deliberada (a aba
+        // "Criar cliente" existe para isso). Vira "pendente" para o usuario
+        // decidir no painel.
+        if (!cfg.criarClientesNovos && !interno) {
+          resultado.clientes.pendentes.push({
+            chave: r.chave, nome: r.nome || '', area_interesse: r.area_interesse || '',
+          });
+          continue;
+        }
+        cliente = db.getOrCreateCliente(r.chave, r.nome || r.chave, INSTITUICAO_PADRAO_ID);
+        garantirFicha(cliente);
+        resultado.clientes.criados++;
+      }
+
+      const arquivo = garantirFicha(cliente);
+      if (interno) {
+        internalizarCliente(cliente, r, origem);
+      } else {
+        aplicarEspelho(arquivo, {
+          origem,
+          recebidoEm,
+          areaInteresse: r.area_interesse,
+          observacoes: r.observacoes,
+          resumoHistorico: r.resumo_historico,
+          pausado: r.pausado,
+        });
+      }
+      resultado.clientes.atualizados++;
+    }
+  }
+
+  // ---- whitelist: UNIAO, nunca remocao ----
+  if (quais.whitelist && recebido.whitelist) {
+    const local = whitelist.lerConfig();
+    const numeros = [...new Set([...local.numeros, ...(recebido.whitelist.numeros || [])])];
+    const bloqueados = [...new Set([...local.bloqueados, ...(recebido.whitelist.bloqueados || [])])];
+    // Por que uniao e nao espelho: "remover autorizacao" nao se propaga — mas
+    // bloquearNumero TAMBEM poe na blacklist, e a blacklist vence a whitelist
+    // em numeroPermitido. Ou seja: autorizacoes sao aditivas, silenciamentos
+    // propagam. E o comportamento certo para o caso perigoso.
+    whitelist.salvarConfig({ numeros, bloqueados });
+    resultado.categorias.push('clientes autorizados');
+  }
+
+  // ---- demais categorias: substituicao direta (sao config, nao dado pessoal) ----
+  if (quais.advogados && Array.isArray(recebido.advogados)) {
+    advogados.salvarAdvogados(recebido.advogados);
+    resultado.categorias.push('advogados');
+  }
+  if (quais.mensagens && recebido.mensagens) {
+    mensagens.salvarMensagens(recebido.mensagens);
+    resultado.categorias.push('mensagens de encaminhamento');
+  }
+  if (quais.triagem && recebido.triagem) {
+    triagem.salvarTriagem(recebido.triagem);
+    resultado.categorias.push('o que anotar e perguntar');
+  }
+  if (quais.personalidade && typeof recebido.personalidade === 'string' && recebido.personalidade.trim()) {
+    salvarPersonalidade(recebido.personalidade);
+    resultado.categorias.push('personalidade');
+  }
+  if (quais.escritorio && recebido.escritorio) {
+    escritorio.salvarEscritorio(recebido.escritorio);
+    resultado.categorias.push('dados do escritório');
+  }
+
+  return resultado;
+}
+
+/**
+ * Lista os clientes que tem bloco espelho (dado vindo do outro PC ainda nao
+ * internalizado), para o painel oferecer o botao "Internalizar".
+ */
+function listarEspelhados() {
+  return db.listClientes()
+    .filter((c) => c.arquivo_md && lerEspelho(c.arquivo_md))
+    .map((c) => ({
+      id: c.id,
+      nome: c.nome_display || c.numero_telefone,
+      numero: c.numero_telefone,
+      espelho: lerEspelho(c.arquivo_md),
+    }));
+}
+
+/** Internaliza o espelho de um cliente pelo id (acao do painel). */
+function internalizarPorId(clienteId) {
+  const cliente = db.getCliente(Number(clienteId));
+  if (!cliente) throw new Error('Cliente não encontrado.');
+  const arquivo = garantirFicha(cliente);
+  const bloco = lerEspelho(arquivo);
+  if (!bloco) throw new Error('Este cliente não tem nada vindo do outro computador.');
+
+  // Relemos os campos do proprio bloco (ele e a unica fonte: o pacote original
+  // pode nem estar mais na caixa-postal).
+  const pegar = (rot) => {
+    const m = bloco.match(new RegExp('^' + rot + ' \\(lá\\):[ \\t]*(.*)$', 'm'));
+    return m ? m[1].trim() : '';
+  };
+  const mOrigem = bloco.match(/^Origem:[ \t]*(.+?)(?:\s*•|$)/m);
+  internalizarCliente(cliente, {
+    area_interesse: pegar('Área de interesse'),
+    observacoes: pegar('Observações'),
+  }, mOrigem ? mOrigem[1].trim() : '');
+  return true;
+}
+
+/**
+ * Importa um cliente que so existe no outro PC (estava em "pendentes").
+ * Cria o cadastro e a ficha, mas NAO mexe na whitelist: autorizar o numero
+ * continua sendo decisao explicita da aba "Criar cliente".
+ */
+function importarPendente(chave, nome) {
+  const digitos = whitelist.soDigitos(chave);
+  if (digitos.length < 12 || digitos.length > 13) throw new Error('Número inválido.');
+  const cliente = db.getOrCreateCliente(digitos, nome || digitos, INSTITUICAO_PADRAO_ID);
+  garantirFicha(cliente);
+  emMemoria.pendentes = emMemoria.pendentes.filter((p) => p.chave !== chave);
+  return { id: cliente.id, nome: cliente.nome_display };
+}
+
+/* ------------------------------------------------------------------ */
 /* HTTP (caixa-postal)                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -320,13 +523,7 @@ function falhar(codigo) {
   return { ok: false, erro: codigo, mensagem: titulo };
 }
 
-/**
- * Sincroniza com uma maquina: envia o pacote local e busca o dela.
- *
- * NESTA FASE o pacote recebido NAO e aplicado — so relatamos o que chegou.
- * Isso e proposital: permite validar toda a tubulacao (servidor, senha,
- * formato) entre as duas cidades sem tocar em nenhum arquivo local.
- */
+/** Sincroniza com uma maquina: envia o pacote local, busca o dela e aplica. */
 async function sincronizarAgora({ maquina, senha } = {}) {
   if (emMemoria.rodando) return { ok: false, erro: 'ja_rodando', mensagem: 'Uma sincronização já está em andamento.' };
 
@@ -352,18 +549,45 @@ async function sincronizarAgora({ maquina, senha } = {}) {
     const recebido = await buscarPacote(alvo, senha);
     if (recebido.erro) return falhar(recebido.erro);
 
+    // 3) Aplica o que veio (se veio algo).
     const agora = new Date().toISOString();
+    let aplicacao = null;
+    if (!recebido.vazio) {
+      if (Number(recebido.schema) > SCHEMA) {
+        // O outro PC esta numa versao mais nova do formato: melhor nao aplicar
+        // do que aplicar pela metade e corromper ficha.
+        avisos.registrar('aviso', 'O outro computador está com uma versão mais nova do programa.',
+          'Atualize este computador (feche e abra pelo iniciar) para poder receber os dados dele.');
+      } else {
+        try {
+          aplicacao = aplicarPacote(recebido, cfg.categorias);
+          emMemoria.pendentes = aplicacao.clientes.pendentes;
+        } catch (e) {
+          console.error('Erro ao aplicar o pacote recebido:', e.message);
+          avisos.registrar('erro', 'Recebi os dados do outro computador, mas não consegui aplicar.',
+            'Nada foi alterado pela metade de propósito. Se continuar, avise o suporte. Detalhe técnico: ' + e.message);
+          return { ok: false, erro: 'falha_ao_aplicar', mensagem: 'Não consegui aplicar os dados recebidos.' };
+        }
+      }
+    }
+
     const resumo = {
       enviados: (pacote.categorias.clientes || []).length,
       recebidos: recebido.vazio ? 0 : ((recebido.categorias && recebido.categorias.clientes) || []).length,
       vazio: recebido.vazio === true,
       geradoEm: recebido.gerado_em || '',
       origem: (recebido.origem && recebido.origem.rotulo) || alvo,
-      aplicado: false, // ainda nao aplicamos nada localmente (ver doc acima)
+      aplicado: !!aplicacao,
+      atualizados: aplicacao ? aplicacao.clientes.atualizados : 0,
+      criados: aplicacao ? aplicacao.clientes.criados : 0,
+      pendentes: aplicacao ? aplicacao.clientes.pendentes.length : 0,
+      outras: aplicacao ? aplicacao.categorias : [],
+      modo: cfg.modoImportacao,
     };
 
     salvarConfig({ ultimo: { envio: agora, recebimento: recebido.vazio ? '' : agora, erro: '', resumo } });
-    console.log(`Sync com "${alvo}": enviados ${resumo.enviados} clientes, recebidos ${resumo.recebidos}.`);
+    console.log(`Sync com "${alvo}": enviados ${resumo.enviados}, recebidos ${resumo.recebidos}, ` +
+      `aplicados ${resumo.atualizados} (${resumo.pendentes} pendentes).`);
     return { ok: true, resumo };
   } finally {
     emMemoria.rodando = false;
@@ -377,7 +601,47 @@ function estado() {
     rodando: emMemoria.rodando,
     ultimo: cfg.ultimo,
     pendentes: emMemoria.pendentes,
+    espelhados: listarEspelhados().length,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Sincronizacao automatica                                            */
+/* ------------------------------------------------------------------ */
+
+let timer = null;
+
+/**
+ * Liga/religa o agendamento conforme o sync.json (autoMinutos).
+ * Roda dentro do proprio processo do bot, que ja fica ligado o tempo todo —
+ * nao usa o Agendador de Tarefas do Windows.
+ *
+ * Exige SYNC_TOKEN no .env: sem a senha salva nao ha como autenticar sozinho
+ * (no modo manual ela e digitada no painel a cada vez).
+ */
+function iniciarAgendamento() {
+  if (timer) { clearInterval(timer); timer = null; }
+
+  const cfg = lerConfig();
+  if (!cfg.autoMinutos) return false;
+
+  if (!String(process.env.SYNC_TOKEN || '').trim()) {
+    avisos.registrar('aviso', 'A sincronização automática está desligada porque a senha não foi salva.',
+      'Para sincronizar sozinho, a senha precisa estar guardada no computador. Enquanto isso, use o botão "Sincronizar agora".');
+    return false;
+  }
+  if (!cfg.id || !cfg.parceiros.length) return false;
+
+  const ms = Math.max(1, cfg.autoMinutos) * 60000;
+  timer = setInterval(() => {
+    sincronizarAgora({ maquina: cfg.parceiros[0].id }).catch((e) => {
+      console.error('Erro na sincronizacao automatica:', e.message);
+    });
+  }, ms);
+  // unref: um timer pendente nao deve segurar o processo ao encerrar o bot.
+  if (timer.unref) timer.unref();
+  console.log(`Sincronizacao automatica ligada: a cada ${cfg.autoMinutos} min com "${cfg.parceiros[0].id}".`);
+  return true;
 }
 
 module.exports = {
@@ -385,9 +649,14 @@ module.exports = {
   lerConfig,
   salvarConfig,
   montarPacote,
+  aplicarPacote,
   enviarPacote,
   buscarPacote,
   listarMaquinas,
   sincronizarAgora,
+  listarEspelhados,
+  internalizarPorId,
+  importarPendente,
+  iniciarAgendamento,
   estado,
 };

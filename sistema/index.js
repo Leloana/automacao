@@ -36,6 +36,15 @@ if (!process.env.DEEPSEEK_API_KEY) {
 const PORTA_PAINEL = Number(process.env.PAINEL_PORTA || 3000);
 painel.iniciarPainel(PORTA_PAINEL);
 
+// 2b) Sincronizacao automatica entre os PCs do escritorio, se configurada
+// (sync.json com autoMinutos > 0 e SYNC_TOKEN no .env). Roda dentro deste
+// processo, que ja fica ligado o tempo todo.
+try {
+  require('./sync').iniciarAgendamento();
+} catch (e) {
+  console.error('Nao foi possivel iniciar a sincronizacao automatica:', e.message);
+}
+
 // 3) Cliente do WhatsApp. Fica em uma variavel mutavel porque, ao "trocar de
 // WhatsApp", destruimos o cliente atual e criamos um novo (com sessao limpa).
 let client;

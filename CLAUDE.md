@@ -218,7 +218,7 @@ remove ```` ``` ````, extrai o primeiro `{...}`. **Não use `response_format: js
   funcionar (o bot degrada pedindo o CNJ). O **DataJud** (`datajud_autocomplete.php`) é
   **API pública** e **não** usa token — não mexer no [datajud.js](sistema/datajud.js).
 
-## Sincronização entre os PCs ([sync.js](sistema/sync.js)) — FASE 1 de 5
+## Sincronização entre os PCs ([sync.js](sistema/sync.js))
 
 O escritório roda o bot em **dois PCs, em cidades diferentes** (Londrina e Taquarituba), com
 **números de WhatsApp diferentes** atendendo os **mesmos clientes**. As duas bases eram cegas
@@ -254,18 +254,33 @@ sem IA (últimas ~10 falas **do cliente**; as do assistant estão salvas como JS
 local), a sessão do WhatsApp e o `bot.db`. É clone de *conhecimento*, não de máquina — o
 outro PC continua pedindo QR code próprio.
 
-**Estado atual: Fase 1 (tubulação).** `sincronizarAgora` envia e busca, mas **não aplica**
-nada localmente (`resumo.aplicado === false`) — permite validar servidor, senha e formato
-entre as duas cidades sem tocar em arquivo. Fases seguintes, na ordem: 2) o espelho
-(`aplicarEspelho` + as exceções no `prompt.js`); 3) demais categorias (whitelist por
-**união**, nunca remoção — o bloqueio propaga porque `bloquearNumero` também põe na
-blacklist); 4) internalizar + pendentes; 5) `setInterval` automático.
+**Dois modos de importação** (`modoImportacao` no `sync.json`), só para a categoria
+`clientes`: **externo** (padrão) põe o dado recebido no bloco espelho, reversível; **interno**
+adota como dado próprio e o bloco some — é a migração/clonagem de PC, irreversível. O botão
+"Juntar com a ficha" (`internalizarPorId`) faz o mesmo caso a caso. Regra única de
+`internalizarCliente`: ficha local **vazia** → adota limpo (resultado idêntico ao PC de
+origem); ficha **com conteúdo** → junta marcando a origem, sem apagar nada.
 
-⚠️ **Ao implementar a Fase 2, a mudança mais importante é no [prompt.js](sistema/prompt.js).**
-Ele hoje manda o modelo absorver tudo que vê no `.md` (*"reescreva sempre a ficha INTEIRA,
-repetindo o que já está no 'Contexto do cliente' acima"*). Sem uma exceção explícita para o
-bloco espelho, o modelo o copia para `perfil.observacoes` no primeiro turno, aquilo vira dado
-local, volta no pacote seguinte — e a fusão que o desenho evita acontece sozinha em ~24h.
+**Whitelist é união, nunca remoção.** Consequência: "remover autorização" não se propaga —
+mas `bloquearNumero` também põe na blacklist, que vence em `numeroPermitido`. Autorizações
+são aditivas; silenciamentos propagam. `liberarTodos` nunca viaja.
+
+**Cliente que só existe no outro PC** não é criado nem autorizado sozinho (salvo
+`criarClientesNovos`): vira "pendente" no painel. `importarPendente` cria a ficha mas **nunca**
+mexe na whitelist — autorizar número continua sendo decisão da aba "Criar cliente".
+
+⚠️ **A mudança mais importante deste recurso está no [prompt.js](sistema/prompt.js).**
+Ele manda o modelo absorver tudo que vê no `.md` (*"reescreva sempre a ficha INTEIRA,
+repetindo o que já está no 'Contexto do cliente' acima"*). Sem a exceção explícita — hoje em
+três lugares: o `blocoEspelho` condicional, a regra de `"perfil"` e a de `"observacoes"` — o
+modelo copiaria o espelho para `perfil.observacoes` no primeiro turno, aquilo viraria dado
+local, voltaria no pacote seguinte, e a fusão que o desenho evita aconteceria sozinha em ~24h.
+**Não remova essas exceções.**
+
+**Sincronização automática**: `iniciarAgendamento` (`setInterval` dentro do processo do bot,
+chamado por [index.js](sistema/index.js) e religado a cada `POST /api/sync/config`). Exige
+`autoMinutos > 0` **e** `SYNC_TOKEN` no `.env` — sem a senha salva não há como autenticar
+sozinho, e o painel avisa isso em vez de falhar em silêncio.
 
 ## Painel web ([painel.js](sistema/painel.js), porta 3000)
 
@@ -313,11 +328,17 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
   na mão; o painel redesenha com o que ficou valendo e avisa se algo foi ajustado.
 - **Advogados** — formulário de criar no topo + lista editável abaixo; **salva
   automaticamente** a cada mudança (não há botão "Salvar").
-- **Sincronizar** — nome desta máquina, cadastro do outro PC, os 7 checkboxes de categoria,
-  senha e "Sincronizar agora" ([sync.js](sistema/sync.js)). O `POST /api/sync/agora` dispara
-  em **segundo plano** e responde na hora, no padrão do `/api/trocar`: `lerCorpo` é
-  **síncrono** e, se o callback devolvesse uma Promise, o painel serializaria `{}` e mostraria
-  um sucesso instantâneo e **falso**. O resultado real chega pelo poll de `/api/sync/estado`.
+- **Sincronizar** — nome desta máquina, senha, escolha do outro PC (botão **Procurar**, que
+  lista via `acao=listar` quem já depositou pacote — evita ter que anotar o nome em papel),
+  os 7 checkboxes de categoria, modo de importação, listas de "espelhados" e "pendentes" com
+  ação por linha, e o intervalo do automático ([sync.js](sistema/sync.js)).
+  O `POST /api/sync/agora` dispara em **segundo plano** e responde na hora, no padrão do
+  `/api/trocar`: `lerCorpo` é **síncrono** e, se o callback devolvesse uma Promise, o painel
+  serializaria `{}` e mostraria um sucesso instantâneo e **falso**. O resultado real chega
+  pelo poll de `/api/sync/estado`. Por isso `/api/sync/maquinas` (que é `async`) também **não**
+  usa `lerCorpo` — lê o corpo na mão.
+  A rota `GET /api/sync` devolve `servidorConfigurado`/`senhaSalva` (booleanos), **nunca** o
+  valor do token.
 - **Responder todo mundo** — aba própria, separada por um divisor no rodapé da sidebar
   (item em vermelho, com "dot" pulsante quando ligado). Liga/desliga o flag `liberarTodos`
   ([whitelist.js](sistema/whitelist.js)) via `/api/liberar`. **Perigosa**: para *ligar* exige

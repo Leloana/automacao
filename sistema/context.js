@@ -178,6 +178,115 @@ function lerPerfilMd(arquivoMd) {
   return extrairPerfil(readMarkdown(arquivoMd));
 }
 
+// Sentinelas do bloco espelhado do OUTRO PC (sincronizacao). Ficam ABAIXO do
+// MARCADOR_ESCRITORIO de proposito: atualizarMdCliente preserva verbatim tudo
+// que vem depois do marcador, entao o bloco sobrevive a cada turno do bot sem
+// precisar de UMA LINHA sequer de mudanca naquela funcao (a mais delicada do
+// projeto, que roda a cada mensagem de cada cliente).
+const ESPELHO_INICIO = '<!-- espelho-sync:inicio -->';
+const ESPELHO_FIM = '<!-- espelho-sync:fim -->';
+
+// O .md inteiro entra no system prompt a cada turno: um espelho gordo vira
+// custo e ruido recorrentes. Cortamos o bloco montado neste limite.
+const ESPELHO_MAX = 1200;
+
+/** Data/hora curta (dia/mes hora:min) para exibir dentro do bloco. */
+function horaCurta(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * Devolve o conteudo do bloco espelhado (sem as sentinelas), ou '' se nao houver.
+ * Usado pelo painel para listar quem tem dado vindo do outro PC.
+ */
+function lerEspelho(arquivoMd) {
+  const atual = readMarkdown(arquivoMd);
+  const i = atual.lastIndexOf(ESPELHO_INICIO);
+  const f = atual.lastIndexOf(ESPELHO_FIM);
+  if (i === -1 || f <= i) return '';
+  return atual.slice(i + ESPELHO_INICIO.length, f).trim();
+}
+
+/**
+ * Escreve (ou remove) o bloco com o que o OUTRO PC sabe deste cliente.
+ *
+ * O bloco e SEMPRE reescrito por inteiro, nunca mesclado: ele espelha o estado
+ * do outro lado. O bot le mas nunca escreve nele (ver prompt.js) — e por isso
+ * que nao existe conflito: nenhum arquivo tem dois donos.
+ *
+ * @param {string} arquivoMd caminho do .md
+ * @param {{origem?:string, recebidoEm?:string, areaInteresse?:string,
+ *          observacoes?:string, resumoHistorico?:string, pausado?:number}} dados
+ *        Passe um objeto vazio (ou sem campos) para REMOVER o bloco.
+ * @returns {boolean} true se o arquivo foi alterado.
+ */
+function aplicarEspelho(arquivoMd, dados = {}) {
+  if (!arquivoMd) return false;
+  const fullPath = path.isAbsolute(arquivoMd) ? arquivoMd : path.join(__dirname, arquivoMd);
+  if (!fs.existsSync(fullPath)) return false;
+
+  let atual = fs.readFileSync(fullPath, 'utf8');
+
+  // GUARDA CONTRA ECO: depois de "internalizar", o dado do outro PC virou dado
+  // nosso e volta para la no proximo pacote — o outro lado nos devolveria um
+  // espelho repetindo o que ja e nosso. Campos identicos ao local sao omitidos.
+  const local = extrairPerfil(atual);
+  const achatar = (t) => String(t || '').replace(/\s*\r?\n\s*/g, ' ').trim();
+  const area = achatar(dados.areaInteresse);
+  const obs = achatar(dados.observacoes);
+  const resumo = achatar(dados.resumoHistorico);
+
+  const linhas = [];
+  if (area && area !== local.areaInteresse) linhas.push(`Área de interesse (lá): ${area}`);
+  if (obs && obs !== local.observacoes) linhas.push(`Observações (lá): ${obs}`);
+  if (resumo) linhas.push(`Resumo do atendimento recente (lá): ${resumo}`);
+  // A pausa NAO e aplicada no banco local (pausar aqui porque um advogado
+  // assumiu o caso la e uma decisao discutivel) — vira so informacao.
+  if (dados.pausado) linhas.push('Situação: o atendimento deste cliente está em pausa no outro número.');
+
+  let bloco = '';
+  if (linhas.length) {
+    const cabecalho = [
+      '## Informado pelo outro número do escritório (não confirmado)',
+      '<!-- Este trecho é reescrito a cada sincronização — não edite aqui. -->',
+      `Origem: ${dados.origem || 'outro computador'} • Recebido em ${horaCurta(dados.recebidoEm)}`,
+    ];
+    let corpo = cabecalho.concat(linhas).join('\n');
+    if (corpo.length > ESPELHO_MAX) corpo = corpo.slice(0, ESPELHO_MAX - 1).trimEnd() + '…';
+    bloco = `${ESPELHO_INICIO}\n${corpo}\n${ESPELHO_FIM}`;
+  }
+
+  // GARANTE O MARCADOR antes de anexar. Sem ele, atualizarMdCliente cai no ramo
+  // idx === -1, monta anotacoes = '' e APAGA o bloco na primeira mensagem que o
+  // cliente mandar. Fichas editadas a mao pelo painel podem nao ter o marcador.
+  if (atual.lastIndexOf(MARCADOR_ESCRITORIO) === -1) {
+    atual = atual.trimEnd() + `\n\n${MARCADOR_ESCRITORIO}\n`;
+  }
+
+  // Splice por SENTINELA (nao por posicao): assim um humano pode mover ou
+  // apagar o bloco pela aba Clientes sem quebrar nada — o proximo sync o
+  // recria no lugar certo. lastIndexOf colapsa blocos duplicados.
+  const i = atual.lastIndexOf(ESPELHO_INICIO);
+  const f = atual.lastIndexOf(ESPELHO_FIM);
+  let novo;
+  if (i !== -1 && f > i) {
+    novo = atual.slice(0, i) + bloco + atual.slice(f + ESPELHO_FIM.length);
+  } else if (bloco) {
+    novo = atual.trimEnd() + '\n\n' + bloco;
+  } else {
+    novo = atual;
+  }
+  // Bloco vazio: nao deixa cabecalho orfao nem linhas em branco sobrando.
+  novo = novo.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+
+  if (novo === atual) return false;
+  fs.writeFileSync(fullPath, novo, 'utf8');
+  return true;
+}
+
 /**
  * Atualiza o .md do cliente com o perfil gerado pelo modelo (area de interesse
  * e observacoes), PRESERVANDO o cabecalho e as anotacoes manuais do escritorio.
@@ -241,5 +350,5 @@ function escreverMarkdown(filepath, conteudo) {
 
 module.exports = {
   readMarkdown, criarMdCliente, criarFichaCliente, atualizarMdCliente,
-  escreverMarkdown, lerPerfilMd,
+  escreverMarkdown, lerPerfilMd, aplicarEspelho, lerEspelho,
 };

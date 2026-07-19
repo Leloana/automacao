@@ -97,6 +97,25 @@ function buildSystemPrompt({ nomeInstituicao, contextoInstituicao, contextoClien
   const blocoDescobrir = triagem.descobrir
     ? `\n  Ao longo da conversa, procure levantar estes pontos (o escritório pediu):\n${triagem.descobrir}\n  Eles são PRIORIDADE, não obrigação: encaixe-os naturalmente na conversa, no ritmo do cliente. NUNCA os transforme em formulário nem em interrogatório, não faça mais de uma ou duas perguntas por vez e não segure o escalonamento para completar a lista — se o cliente pedir para falar com alguém, estiver impaciente ou o caso for urgente, escale na hora com o que você já tem, mesmo faltando tudo.`
     : '';
+  // Bloco espelhado do OUTRO numero do escritorio (sincronizacao entre PCs).
+  // So entra quando a ficha realmente tem o bloco — ver context.js/sync.js.
+  //
+  // ESTE BLOCO NAO E OPCIONAL quando ha espelho. O prompt manda o modelo
+  // reescrever a ficha inteira "repetindo o que ja esta no Contexto do cliente"
+  // (regra de "observacoes", mais abaixo). Sem a excecao explicita aqui, ele
+  // copiaria o espelho para perfil.observacoes no primeiro turno; aquilo viraria
+  // dado local, entraria no proximo pacote de sincronizacao, e a fusao que o
+  // desenho existe para evitar aconteceria sozinha em cerca de um dia.
+  const temEspelho = contextoCliente && contextoCliente.includes('espelho-sync');
+  const blocoEspelho = temEspelho
+    ? `
+
+ATENÇÃO ao trecho "Informado pelo outro número do escritório" no contexto acima:
+- Ele veio de um atendimento feito por OUTRO número da equipe, não desta conversa. Trate como INDÍCIO, nunca como fato: pode estar desatualizado ou se referir a outra situação.
+- NUNCA afirme ao cliente que ele já contou aquilo, e nunca dê aquilo como certo. Se for útil, confirme com naturalidade ("me confirma se ainda é sobre X?").
+- NUNCA copie o conteúdo desse trecho para "perfil.observacoes" nem para "perfil.area_interesse". Nesses campos vai APENAS o que o cliente disser A VOCÊ, nesta conversa. O que veio do outro número já está registrado do outro lado.`
+    : '';
+
   const blocoAnotar = triagem.anotar
     ? `\n        - O escritório quer ver estes pontos na ficha sempre que o cliente mencionar algum deles (não pergunte por eles só para preencher — aqui é só registro do que surgir):\n${triagem.anotar}\n        - A lista acima é o mínimo, não o limite: registre também qualquer outra coisa relevante que o cliente contar.`
     : '';
@@ -105,7 +124,7 @@ function buildSystemPrompt({ nomeInstituicao, contextoInstituicao, contextoClien
 
 Contexto do escritório:
 
-${contextoInstituicao}${blocoCliente}
+${contextoInstituicao}${blocoCliente}${blocoEspelho}
 
 IMPORTANTE: responda SEMPRE com um único objeto JSON válido, e NADA além dele — sem nenhum texto antes ou depois, e sem cercas de código (\`\`\`). Use exatamente este formato:
 {
@@ -140,12 +159,12 @@ Regras de cada campo:
     - Se você já tem o número CNJ, use "consultar_processo" (NÃO "consultar_cliente"). Nunca preencha os dois ao mesmo tempo.
     - Se o sistema avisar que há mais de um cliente com o mesmo nome, NUNCA cite nomes de terceiros; peça o CPF para identificar com segurança.
     - Em todos os outros casos, deixe "consultar_cliente": null.
-- "perfil": a FICHA do cliente para o escritório consultar depois, construída a partir de TODA a conversa (incluindo o "Contexto do cliente" acima, se houver). Preencha em TODOS os turnos — é assim que o escritório enxerga o atendimento.
+- "perfil": a FICHA do cliente para o escritório consultar depois, construída a partir de TODA a conversa (incluindo o "Contexto do cliente" acima, se houver — MENOS o trecho "Informado pelo outro número do escritório", que nunca entra aqui). Preencha em TODOS os turnos — é assim que o escritório enxerga o atendimento.
     - "area_interesse": em poucas palavras, o assunto/área jurídica que o cliente procura (ex.: "rescisão trabalhista", "pensão alimentícia", "consulta sobre processo"). Assim que houver qualquer pista do assunto, já preencha, mesmo que provisório — você pode corrigir depois. Só deixe "" enquanto não houver pista nenhuma.
     - "observacoes": a MEMÓRIA de longo prazo do cliente. Só as mensagens mais recentes ficam visíveis para você; as antigas somem da conversa, e o que não estiver aqui se perde para sempre.
         - A régua é BAIXA: na dúvida, registre. Anote tudo que o cliente contar sobre si ou sobre o caso, mesmo que pareça pequeno ou ainda solto, inclusive o estado do atendimento (ex.: "primeiro contato; só se apresentou, ainda não disse o assunto").${blocoAnotar}
         - Só deixe "" se o cliente literalmente não tiver dito nada além de um cumprimento — e, mesmo aí, prefira registrar que houve um primeiro contato.
-        - Este campo SUBSTITUI o anterior: reescreva sempre a ficha INTEIRA, repetindo o que já está no "Contexto do cliente" acima e acrescentando o que for novo. Um fato que você omitir some do registro.
+        - Este campo SUBSTITUI o anterior: reescreva sempre a ficha INTEIRA, repetindo o que já está no "Contexto do cliente" acima e acrescentando o que for novo. Um fato que você omitir some do registro. ÚNICA exceção: o trecho "Informado pelo outro número do escritório" NÃO deve ser repetido aqui — ele pertence ao outro atendimento e é mantido automaticamente.
         - Texto corrido e factual, numa única linha (sem quebras de linha, listas ou marcadores). Pode crescer conforme a conversa avança — de uma até dez frases curtas, sem encurtar o que já existia.
         - Use apenas o que o cliente disse — nunca invente nem deduza dados.
 

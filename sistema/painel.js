@@ -78,7 +78,7 @@ const HTML = `<!DOCTYPE html>
   .toggle input { width: 18px; height: 18px; }
   .toggle small { color: #94a3b8; display: block; }
   .add { display: flex; gap: 8px; margin-bottom: 16px; }
-  input[type=text], input[type=password] { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
+  input[type=text], input[type=password], input[type=number] { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
   textarea { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 14px; line-height: 1.5; font-family: inherit; resize: vertical; }
   select { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
   button { cursor: pointer; border: none; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600; }
@@ -95,6 +95,22 @@ const HTML = `<!DOCTYPE html>
   .adv .checks { display: flex; gap: 16px; align-items: center; margin-top: 4px; }
   .adv .checks label { display: flex; align-items: center; gap: 6px; margin: 0; color: #e2e8f0; cursor: pointer; }
   .adv .adv-foot { display: flex; justify-content: flex-end; margin-top: 4px; }
+  /* Formulario de adicionar EMPILHADO: dois campos + botao nao cabem lado a
+     lado na largura do card (o botao era cortado na borda direita). */
+  .add-col { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .add-col button { align-self: flex-start; }
+  /* Linha de item (maquina cadastrada, cliente espelhado, pendente). */
+  .sync-item { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .sync-item .nome { flex: 1; min-width: 140px; color: #e2e8f0; }
+  .sync-item .sub { margin: 0; }
+  .sync-item button { flex-shrink: 0; }
+  .btn-mini { background: #334155; color: #e2e8f0; padding: 6px 12px; font-size: 13px; }
+  .btn-mini.ok { background: #22c55e; color: #06210f; }
+  details.mais { margin-top: 10px; }
+  details.mais summary { cursor: pointer; color: #94a3b8; font-size: 13px; padding: 4px 0; }
+  .espelho-txt { white-space: pre-wrap; font-size: 12px; color: #94a3b8; background: #0b1220;
+    border-radius: 6px; padding: 8px 10px; margin-top: 6px; width: 100%; }
   ul { list-style: none; padding: 0; margin: 0 0 8px; }
   li { display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; font-size: 15px; letter-spacing: .5px; }
   .vazio { color: #64748b; font-style: italic; padding: 12px 0; }
@@ -498,16 +514,35 @@ Localização: Londrina, PR
       </div>
     </div>
 
-    <!-- 2) O outro computador -->
+    <!-- 2) Senha (usada tanto para procurar quanto para sincronizar) -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">🔐 Senha da sincronização</div>
+      <p class="sub" style="margin:0 0 12px">A <b>mesma nos dois computadores</b> — foi definida quando o site do escritório foi preparado. Não fica guardada nesta tela: você digita quando for usar.</p>
+      <div class="field" style="max-width:320px">
+        <label>Senha</label>
+        <input type="password" id="sync-senha" placeholder="senha combinada" />
+      </div>
+    </div>
+
+    <!-- 3) O outro computador -->
     <div class="adv">
       <div style="font-weight:600;margin-bottom:4px">💻 Com qual computador sincronizar</div>
-      <p class="sub" style="margin:0 0 12px">Cadastre aqui o nome que foi dado ao <b>outro</b> PC (o mesmo que está no campo acima, na tela dele).</p>
+      <p class="sub" style="margin:0 0 12px">Clique em <b>Procurar</b> para ver os computadores que já apareceram no servidor do escritório. Um computador só aparece aqui <b>depois de sincronizar pelo menos uma vez</b>.</p>
+
       <div id="sync-parceiros"></div>
-      <div class="add">
-        <input type="text" id="sync-novo-id" placeholder="taquarituba" />
-        <input type="text" id="sync-novo-rotulo" placeholder="PC de Taquarituba (opcional)" />
-        <button class="btn-add" onclick="addParceiro()">+ Adicionar</button>
-      </div>
+
+      <button class="btn-add" onclick="procurarMaquinas()">🔍 Procurar computadores</button>
+      <div id="sync-achados"></div>
+
+      <details class="mais">
+        <summary>Não apareceu na lista? Cadastrar pelo nome</summary>
+        <p class="sub" style="margin:8px 0 0">Use o nome exato que foi dado ao outro PC (o campo "Nome deste computador", na tela dele).</p>
+        <div class="add-col">
+          <input type="text" id="sync-novo-id" placeholder="taquarituba" />
+          <input type="text" id="sync-novo-rotulo" placeholder="PC de Taquarituba (opcional)" />
+          <button class="btn-add" onclick="addParceiro()">+ Adicionar</button>
+        </div>
+      </details>
     </div>
 
     <!-- 3) O que sincronizar -->
@@ -523,22 +558,54 @@ Localização: Londrina, PR
       <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-escritorio" onchange="salvarCategorias()" /><span><b>Dados do escritório</b> — áreas atendidas, horário, endereço e orientações.</span></label>
     </div>
 
-    <!-- 4) Sincronizar -->
+    <!-- 5) Como aplicar o que chega -->
     <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">🔐 Sincronizar agora</div>
-      <p class="sub" style="margin:0 0 12px">A senha é a <b>mesma nos dois computadores</b> — foi definida quando o site do escritório foi preparado. Ela não fica guardada nesta tela.</p>
-      <div class="field" style="max-width:280px">
-        <label>Senha da sincronização</label>
-        <input type="password" id="sync-senha" placeholder="senha combinada" />
-      </div>
-      <button class="btn-save" id="btn-sync" onclick="sincronizarAgora()">Sincronizar agora</button>
-      <div class="status" id="status-sync"></div>
+      <div style="font-weight:600;margin-bottom:4px">📥 Como usar o que vier do outro PC</div>
+      <p class="sub" style="margin:0 0 12px">Isto vale para as <b>fichas dos clientes</b>. As outras opções (advogados, mensagens...) são sempre aplicadas direto.</p>
+      <label class="ack" style="margin:0 0 8px">
+        <input type="radio" name="sync-modo" value="externo" onchange="salvarModo()" />
+        <span><b>Manter separado</b> (recomendado) — o que vem do outro PC aparece na ficha num trecho <b>à parte e identificado</b>. O bot lê, mas trata como "ainda não confirmado" e confere com o cliente. <b>Nada do que você tem aqui é alterado.</b> Dá para voltar atrás.</span>
+      </label>
+      <label class="ack" style="margin:0 0 8px">
+        <input type="radio" name="sync-modo" value="interno" onchange="salvarModo()" />
+        <span><b>Juntar com o que já tenho</b> — o que vem do outro PC vira ficha deste computador e o aviso de "veio de fora" some. Use ao <b>trocar de computador</b> ou quando os dois números atendem a mesma pessoa e você quer uma ficha só. <b>Não dá para desfazer.</b></span>
+      </label>
+      <label class="ack" style="margin:8px 0 0">
+        <input type="checkbox" id="sync-criar-novos" onchange="salvarCriarNovos()" />
+        <span>Criar automaticamente a ficha de clientes que só existem no outro PC. Desligado, eles ficam numa lista para você decidir um a um. <b>Em nenhum dos casos o número é autorizado sozinho</b> — isso continua sendo feito na aba "Criar cliente".</span>
+      </label>
     </div>
 
+    <!-- 6) Acao -->
+    <button class="btn-save" id="btn-sync" onclick="sincronizarAgora()">Sincronizar agora</button>
+    <div class="status" id="status-sync"></div>
     <div id="sync-ultimo" class="banner b-carregando" style="display:none"></div>
 
-    <div class="banner b-carregando" style="border-color:#a16207;background:#2a2109;color:#fde68a;margin-top:16px">
-      <span>ℹ️ <b>Nesta versão a sincronização ainda não altera nada neste computador.</b> Ela envia o que você tem e mostra o que o outro PC enviou, para você conferir que a ligação entre os dois está funcionando. A aplicação dos dados entra na próxima etapa.</span>
+    <!-- 7) Clientes com dado vindo de fora (so no modo "manter separado") -->
+    <div class="adv" id="sync-box-espelhados" style="display:none">
+      <div style="font-weight:600;margin-bottom:4px">🔗 Clientes com informação do outro computador</div>
+      <p class="sub" style="margin:0 0 12px">O trecho vindo de fora está guardado à parte na ficha destes clientes. <b>Juntar</b> transforma aquilo em ficha deste computador e tira o aviso de "veio de fora" — não dá para desfazer.</p>
+      <div id="sync-espelhados"></div>
+    </div>
+
+    <!-- 8) Clientes que so existem no outro PC -->
+    <div class="adv" id="sync-box-pendentes" style="display:none">
+      <div style="font-weight:600;margin-bottom:4px">🆕 Clientes que só existem no outro computador</div>
+      <p class="sub" style="margin:0 0 12px">Estes clientes nunca escreveram para o número deste computador. <b>Importar</b> cria a ficha aqui — mas <b>não</b> autoriza o número: para o bot atender, use a aba "Criar cliente".</p>
+      <div id="sync-pendentes"></div>
+    </div>
+
+    <!-- 9) Automatico -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">⏰ Sincronizar sozinho</div>
+      <p class="sub" style="margin:0 0 12px">De quanto em quanto tempo sincronizar sem você precisar clicar. <b>0 = desligado</b> (só quando você mandar).</p>
+      <div class="field" style="max-width:280px">
+        <label>A cada quantos minutos</label>
+        <input type="number" id="sync-auto" min="0" max="1440" step="1" onchange="salvarAuto()" />
+      </div>
+      <div id="sync-auto-aviso" class="banner b-qr" style="display:none;margin-top:10px">
+        <span>⚠️ Para sincronizar sozinho, a senha precisa ficar <b>guardada neste computador</b> (linha <code>SYNC_TOKEN</code> no arquivo de configuração). Enquanto ela não estiver salva, isto continua desligado e você usa o botão acima.</span>
+      </div>
     </div>
 
     <p class="sub" style="margin-top:16px"><b>Atenção:</b> isto sincroniza o que o escritório <b>sabe</b> sobre os clientes — não a conta do WhatsApp nem as conversas em si. Cada computador continua com o seu próprio número e precisa do seu próprio QR code.</p>
@@ -1296,19 +1363,126 @@ Localização: Londrina, PR
     const box = document.getElementById('sync-parceiros');
     box.innerHTML = '';
     if (!syncCfg.parceiros.length) {
-      box.innerHTML = '<p class="sub">Nenhum outro computador cadastrado ainda.</p>';
+      box.innerHTML = '<p class="sub">Nenhum outro computador escolhido ainda.</p>';
       return;
     }
     syncCfg.parceiros.forEach((p, i) => {
       const div = document.createElement('div');
-      div.className = 'checks';
-      div.innerHTML = '<span style="flex:1"><b>' + esc(p.rotulo || p.id) + '</b> <span class="sub">(' + esc(p.id) + ')</span></span>' +
+      div.className = 'sync-item';
+      div.innerHTML = '<span class="nome">✅ <b>' + esc(p.rotulo || p.id) + '</b> <span class="sub">(' + esc(p.id) + ')</span></span>' +
         '<button class="btn-rem" data-rem-parc="' + i + '">Remover</button>';
       box.appendChild(div);
     });
     box.querySelectorAll('[data-rem-parc]').forEach((b) => {
       b.addEventListener('click', () => removerParceiro(Number(b.getAttribute('data-rem-parc'))));
     });
+  }
+  // Pergunta ao servidor quais computadores ja apareceram por la. E o jeito de
+  // descobrir o nome do outro PC sem ter que anotar em papel.
+  async function procurarMaquinas(){
+    const senha = document.getElementById('sync-senha').value;
+    const box = document.getElementById('sync-achados');
+    if (!senha) { setStatusSync('Digite a senha da sincronização acima para poder procurar.', false); return; }
+    box.innerHTML = '<p class="sub">Procurando...</p>';
+    try {
+      const r = await fetch('/api/sync/maquinas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }) });
+      const d = await r.json();
+      if (d.erro) { box.innerHTML = ''; setStatusSync(d.mensagem || ('Erro: ' + d.erro), false); return; }
+      // Nao faz sentido sincronizar consigo mesmo, nem repetir quem ja foi escolhido.
+      const outros = (d.maquinas || []).filter((m) => m.id !== syncCfg.id && !syncCfg.parceiros.some((p) => p.id === m.id));
+      if (!outros.length) {
+        box.innerHTML = '<p class="sub">Nenhum computador novo encontrado. Lembre: o outro PC precisa ter sincronizado pelo menos uma vez para aparecer aqui.</p>';
+        return;
+      }
+      box.innerHTML = '';
+      outros.forEach((m) => {
+        const div = document.createElement('div');
+        div.className = 'sync-item';
+        div.innerHTML = '<span class="nome"><b>' + esc(m.rotulo || m.id) + '</b> <span class="sub">(' + esc(m.id) + ')</span><br>' +
+          '<span class="sub">Enviou dados em ' + esc(quando(m.gravado_em)) + '</span></span>' +
+          '<button class="btn-mini ok" data-usar="' + esc(m.id) + '" data-rot="' + esc(m.rotulo || m.id) + '">Usar este</button>';
+        box.appendChild(div);
+      });
+      box.querySelectorAll('[data-usar]').forEach((b) => {
+        b.addEventListener('click', () => {
+          box.innerHTML = '';
+          salvarSync({ parceiros: syncCfg.parceiros.concat([{ id: b.getAttribute('data-usar'), rotulo: b.getAttribute('data-rot') }]) }, 'Computador escolhido.');
+        });
+      });
+    } catch (e) { box.innerHTML = ''; setStatusSync('Erro ao procurar: ' + e.message, false); }
+  }
+  function renderEspelhados(lista){
+    const box = document.getElementById('sync-espelhados');
+    const caixa = document.getElementById('sync-box-espelhados');
+    caixa.style.display = (lista && lista.length) ? 'block' : 'none';
+    if (!lista || !lista.length) return;
+    box.innerHTML = '';
+    lista.forEach((c) => {
+      const div = document.createElement('div');
+      div.className = 'sync-item';
+      div.innerHTML = '<span class="nome"><b>' + esc(c.nome) + '</b> <span class="sub">(' + esc(c.numero) + ')</span></span>' +
+        '<button class="btn-mini" data-ver="' + c.id + '">Ver</button>' +
+        '<button class="btn-mini ok" data-int="' + c.id + '">Juntar com a ficha</button>' +
+        '<div class="espelho-txt" id="esp-' + c.id + '" style="display:none">' + esc(c.espelho) + '</div>';
+      box.appendChild(div);
+    });
+    box.querySelectorAll('[data-ver]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const d = document.getElementById('esp-' + b.getAttribute('data-ver'));
+        d.style.display = d.style.display === 'none' ? 'block' : 'none';
+      });
+    });
+    box.querySelectorAll('[data-int]').forEach((b) => {
+      b.addEventListener('click', () => internalizar(b.getAttribute('data-int')));
+    });
+  }
+  async function internalizar(id){
+    if (!confirm('Juntar as informações do outro computador na ficha deste cliente?\\n\\nDepois disso elas viram ficha daqui e o aviso de "veio de fora" some. Não dá para desfazer.')) return;
+    try {
+      const r = await fetch('/api/sync/internalizar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      const d = await r.json();
+      if (d.erro) return setStatusSync('Erro: ' + d.erro, false);
+      setStatusSync('Pronto: agora faz parte da ficha deste computador.', true);
+      carregarSync();
+      carregarClientes();
+    } catch (e) { setStatusSync('Erro: ' + e.message, false); }
+  }
+  function renderPendentes(lista){
+    const box = document.getElementById('sync-pendentes');
+    const caixa = document.getElementById('sync-box-pendentes');
+    caixa.style.display = (lista && lista.length) ? 'block' : 'none';
+    if (!lista || !lista.length) return;
+    box.innerHTML = '';
+    lista.forEach((p) => {
+      const div = document.createElement('div');
+      div.className = 'sync-item';
+      div.innerHTML = '<span class="nome"><b>' + esc(p.nome || '(sem nome)') + '</b> <span class="sub">(' + esc(p.chave) + ')</span>' +
+        (p.area_interesse ? '<br><span class="sub">' + esc(p.area_interesse) + '</span>' : '') + '</span>' +
+        '<button class="btn-mini ok" data-imp="' + esc(p.chave) + '" data-nome="' + esc(p.nome || '') + '">Importar</button>';
+      box.appendChild(div);
+    });
+    box.querySelectorAll('[data-imp]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        try {
+          const r = await fetch('/api/sync/importar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave: b.getAttribute('data-imp'), nome: b.getAttribute('data-nome') }) });
+          const d = await r.json();
+          if (d.erro) return setStatusSync('Erro: ' + d.erro, false);
+          setStatusSync('Cliente importado. Para o bot atender este número, autorize na aba "Criar cliente".', true);
+          carregarSync();
+          carregarClientes();
+        } catch (e) { setStatusSync('Erro: ' + e.message, false); }
+      });
+    });
+  }
+  function salvarModo(){
+    const el = document.querySelector('input[name="sync-modo"]:checked');
+    if (el) salvarSync({ modoImportacao: el.value }, 'Salvo.');
+  }
+  function salvarCriarNovos(){
+    salvarSync({ criarClientesNovos: document.getElementById('sync-criar-novos').checked }, 'Salvo.');
+  }
+  function salvarAuto(){
+    salvarSync({ autoMinutos: Number(document.getElementById('sync-auto').value) || 0 }, 'Salvo.');
   }
   async function carregarSync(){
     try {
@@ -1322,7 +1496,17 @@ Localização: Londrina, PR
       if (document.activeElement !== idEl) idEl.value = d.id || '';
       if (document.activeElement !== rotEl) rotEl.value = d.rotulo || '';
       CATS.forEach((c) => { document.getElementById('cat-' + c).checked = !!(d.categorias || {})[c]; });
+      const modo = document.querySelector('input[name="sync-modo"][value="' + (d.modoImportacao || 'externo') + '"]');
+      if (modo) modo.checked = true;
+      document.getElementById('sync-criar-novos').checked = !!d.criarClientesNovos;
+      const autoEl = document.getElementById('sync-auto');
+      if (document.activeElement !== autoEl) autoEl.value = d.autoMinutos || 0;
+      // Aviso do automatico: so faz sentido quando ele esta ligado sem a senha salva.
+      document.getElementById('sync-auto-aviso').style.display =
+        (d.autoMinutos > 0 && !d.senhaSalva) ? 'block' : 'none';
       renderParceiros();
+      renderEspelhados(d.espelhados);
+      renderPendentes(d.pendentes);
       atualizarEstadoSync(d);
     } catch (e) { /* silencioso: a aba faz poll */ }
   }
@@ -1359,9 +1543,20 @@ Localização: Londrina, PR
     if (res.enviados === undefined) { box.style.display = 'none'; return; }
     box.style.display = 'block';
     box.className = 'banner b-conectado';
-    let t = '✅ Enviei ' + res.enviados + ' ficha(s) de cliente deste computador. ';
-    if (res.vazio) t += 'O outro computador (' + esc(res.origem || '') + ') ainda não enviou nada.';
-    else t += 'Recebi ' + res.recebidos + ' ficha(s) de ' + esc(res.origem || '') + (res.geradoEm ? ', de ' + quando(res.geradoEm) : '') + '.';
+    let t = '✅ Enviei ' + res.enviados + ' ficha(s) deste computador. ';
+    if (res.vazio) {
+      t += 'O outro computador (' + esc(res.origem || '') + ') ainda não enviou nada.';
+    } else {
+      t += 'Recebi ' + res.recebidos + ' de ' + esc(res.origem || '') + (res.geradoEm ? ' (de ' + quando(res.geradoEm) + ')' : '') + '. ';
+      if (res.aplicado) {
+        const partes = [];
+        if (res.atualizados) partes.push(res.atualizados + ' ficha(s) ' + (res.modo === 'interno' ? 'juntada(s)' : 'com informação nova à parte'));
+        if (res.criados) partes.push(res.criados + ' cliente(s) criado(s)');
+        if (res.pendentes) partes.push(res.pendentes + ' aguardando sua decisão');
+        (res.outras || []).forEach((o) => partes.push(o));
+        t += partes.length ? 'Apliquei: ' + partes.join(', ') + '.' : 'Nada de novo para aplicar.';
+      }
+    }
     box.innerHTML = '<span>' + t + '</span>';
   }
   function quando(iso){
@@ -1788,8 +1983,11 @@ function iniciarPainel(porta = 3000) {
         ...cfg,
         rodando: est.rodando,
         pendentes: est.pendentes,
-        // Serve so para a tela explicar o que falta configurar.
+        espelhados: sync.listarEspelhados(),
+        // Servem so para a tela explicar o que falta configurar. Nunca
+        // devolvemos o valor da senha, apenas se ela existe.
         servidorConfigurado: !!String(process.env.SYNC_URL || '').trim(),
+        senhaSalva: !!String(process.env.SYNC_TOKEN || '').trim(),
       });
     }
 
@@ -1816,7 +2014,14 @@ function iniciarPainel(porta = 3000) {
         if (corpo.autoMinutos !== undefined) parcial.autoMinutos = Number(corpo.autoMinutos) || 0;
 
         const salvo = sync.salvarConfig(parcial);
-        return { ...salvo, servidorConfigurado: !!String(process.env.SYNC_URL || '').trim() };
+        // Religa o agendamento: mudar o intervalo (ou o computador parceiro)
+        // tem que valer na hora, sem reiniciar o bot — como o resto do painel.
+        try { sync.iniciarAgendamento(); } catch (e) { console.error('Erro ao religar o sync automatico:', e.message); }
+        return {
+          ...salvo,
+          servidorConfigurado: !!String(process.env.SYNC_URL || '').trim(),
+          senhaSalva: !!String(process.env.SYNC_TOKEN || '').trim(),
+        };
       });
     }
 
@@ -1834,6 +2039,40 @@ function iniciarPainel(porta = 3000) {
 
     if (req.method === 'GET' && req.url === '/api/sync/estado') {
       return enviarJson(res, 200, sync.estado());
+    }
+
+    // Lista os computadores que ja apareceram no servidor. POST (e nao GET com
+    // a senha na query) porque query string vai parar em log de servidor.
+    if (req.method === 'POST' && req.url === '/api/sync/maquinas') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
+      req.on('end', async () => {
+        try {
+          const corpo = JSON.parse(body || '{}');
+          const r = await sync.listarMaquinas(corpo.senha);
+          if (r && r.erro) {
+            const msg = r.erro === 'senha_invalida'
+              ? 'A senha foi recusada. Confira se é a mesma dos dois computadores.'
+              : 'Não consegui falar com o servidor do escritório.';
+            return enviarJson(res, 200, { erro: r.erro, mensagem: msg });
+          }
+          return enviarJson(res, 200, { maquinas: Array.isArray(r) ? r : [] });
+        } catch (e) {
+          return enviarJson(res, 400, { erro: e.message });
+        }
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/sync/internalizar') {
+      return lerCorpo(req, res, (corpo) => {
+        sync.internalizarPorId(corpo.id);
+        return { ok: true };
+      });
+    }
+
+    if (req.method === 'POST' && req.url === '/api/sync/importar') {
+      return lerCorpo(req, res, (corpo) => sync.importarPendente(corpo.chave, corpo.nome));
     }
 
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
