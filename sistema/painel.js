@@ -227,7 +227,19 @@ const HTML = `<!DOCTYPE html>
     <button class="btn-save" onclick="salvarGeminiKey()">Salvar chave do Google</button>
     <div class="status" id="status-gemini"></div>
 
-    <p class="sub" style="margin-top:16px">As chaves ficam guardadas só neste computador (arquivo <code>.env</code>) e nunca vão para a internet nem para o repositório.</p>
+    <hr style="border:none;border-top:1px solid #334155;margin:24px 0" />
+
+    <h2>Senha da sincronização<span class="info" tabindex="0" role="img" aria-label="Ajuda">i<span class="tip">A senha combinada entre os computadores do escritório, usada pela aba "Sincronizar". É a mesma nos dois PCs e foi definida quando o site do escritório foi preparado. Digitando aqui uma vez, a aba "Sincronizar" não pede mais nada.</span></span></h2>
+    <p class="sub">Só é necessária se o escritório usa <b>mais de um computador</b>. É a <b>mesma senha nos dois</b> — foi definida quando o site do escritório foi preparado. Digite aqui <b>uma vez</b> e a aba "Sincronizar" para de pedir; também é ela que permite sincronizar sozinho, de tempos em tempos.</p>
+    <div id="syncsenha-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="syncsenha-estado-txt">Verificando...</span></div>
+    <div class="add">
+      <input type="password" id="sync-token" placeholder="Cole aqui a senha combinada" autocomplete="off" />
+      <button class="btn-add" onclick="mostrarSenhaSync()" title="Mostrar/ocultar">👁</button>
+    </div>
+    <button class="btn-save" onclick="salvarSenhaSync()">Salvar senha</button>
+    <div class="status" id="status-syncsenha"></div>
+
+    <p class="sub" style="margin-top:16px">As chaves e a senha ficam guardadas só neste computador (arquivo <code>.env</code>) e nunca vão para a internet nem para o repositório.</p>
   </div>
 
   <!-- Conexao do WhatsApp -->
@@ -510,22 +522,18 @@ Localização: Londrina, PR
       </div>
     </div>
 
-    <!-- 2) Senha: destrava o resto da tela (e a lista de computadores) -->
-    <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">2️⃣ Senha da sincronização</div>
-      <p class="sub" style="margin:0 0 12px">A <b>mesma nos dois computadores</b> — foi definida quando o site do escritório foi preparado. É ela que deixa este PC ver os outros; <b>o resto da tela aparece depois que você digitar.</b> Não fica guardada aqui: você digita quando for usar.</p>
-      <div class="field" style="max-width:320px">
-        <label>Senha</label>
-        <input type="password" id="sync-senha" placeholder="senha combinada" oninput="senhaMudou()" />
-      </div>
+    <!-- Sem a senha guardada no .env nao ha o que fazer nesta aba. Ela e
+         digitada UMA VEZ na aba "Chave da API", junto dos outros segredos. -->
+    <div id="sync-sem-senha" class="banner b-qr" style="display:none;margin-bottom:16px">
+      <span>🔐 Falta a <b>senha da sincronização</b>. Ela é digitada uma vez só na aba <b>"Chave da API"</b>, no final da página — depois esta tela funciona sozinha.</span>
     </div>
 
-    <!-- Tudo daqui para baixo so aparece com a senha preenchida -->
+    <!-- Tudo daqui para baixo so aparece com a senha ja guardada -->
     <div id="sync-resto" style="display:none">
 
-    <!-- 3) O outro computador -->
+    <!-- 2) O outro computador -->
     <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">3️⃣ Com qual computador sincronizar</div>
+      <div style="font-weight:600;margin-bottom:4px">2️⃣ Com qual computador sincronizar</div>
       <p class="sub" style="margin:0 0 12px">Escolha na lista. Um computador só aparece aqui <b>depois de sincronizar pelo menos uma vez</b>.</p>
       <div class="field" style="max-width:380px">
         <label>Outro computador</label>
@@ -536,7 +544,7 @@ Localização: Londrina, PR
 
     <!-- 4) O que sincronizar -->
     <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">4️⃣ O que enviar e receber</div>
+      <div style="font-weight:600;margin-bottom:4px">3️⃣ O que enviar e receber</div>
       <p class="sub" style="margin:0 0 12px">Marque só o que faz sentido compartilhar. <b>As chaves da API nunca são enviadas</b>, em nenhuma opção.</p>
       <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-clientes" onchange="salvarCategorias()" /><span><b>Fichas dos clientes</b> — o que cada cliente já contou (área do caso, observações e um resumo do atendimento recente).</span></label>
       <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-whitelist" onchange="salvarCategorias()" /><span><b>Clientes autorizados</b> — as duas listas são <b>somadas</b>, nunca apagadas. Quem você bloqueou também passa a ser bloqueado no outro PC.</span></label>
@@ -547,7 +555,7 @@ Localização: Londrina, PR
       <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-escritorio" onchange="salvarCategorias()" /><span><b>Dados do escritório</b> — áreas atendidas, horário, endereço e orientações.</span></label>
     </div>
 
-    <!-- 5) Acao -->
+    <!-- 4) Acao -->
     <button class="btn-save" id="btn-sync" onclick="sincronizarAgora()">Sincronizar agora</button>
     <div class="status" id="status-sync"></div>
     <div id="sync-ultimo" class="banner b-carregando" style="display:none"></div>
@@ -584,9 +592,6 @@ Localização: Londrina, PR
         <div class="field" style="max-width:280px">
           <label>A cada quantos minutos</label>
           <input type="number" id="sync-auto" min="0" max="1440" step="1" onchange="salvarAuto()" />
-        </div>
-        <div id="sync-auto-aviso" class="banner b-qr" style="display:none;margin-top:10px">
-          <span>⚠️ Para sincronizar sozinho, a senha precisa ficar <b>guardada neste computador</b> (linha <code>SYNC_TOKEN</code> no arquivo de configuração). Enquanto ela não estiver salva, isto continua desligado e você usa o botão acima.</span>
         </div>
       </div>
 
@@ -959,6 +964,47 @@ Localização: Londrina, PR
       setStatusGemini('Chave salva! Os próximos áudios e imagens já serão entendidos (sem reiniciar).', true);
       carregarGeminiKey();
     } catch (e) { setStatusGemini('Erro ao salvar: ' + e.message, false); }
+  }
+
+  // ---- Senha da sincronizacao (SYNC_TOKEN) ----
+  // Mora nesta aba junto das chaves: e um segredo do .env, digitado uma vez so.
+  // A aba "Sincronizar" apenas confere se ela existe.
+  function setStatusSenhaSync(msg, ok){
+    const s = document.getElementById('status-syncsenha');
+    s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
+  }
+  function mostrarSenhaSync(){
+    const inp = document.getElementById('sync-token');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+  async function carregarSenhaSync(){
+    try {
+      const r = await fetch('/api/sync/senha');
+      const d = await r.json();
+      const est = document.getElementById('syncsenha-estado');
+      const txt = document.getElementById('syncsenha-estado-txt');
+      if (d.configurada) {
+        est.className = 'banner b-conectado';
+        txt.textContent = 'Senha guardada (' + d.mascara + ') — a aba "Sincronizar" já pode ser usada.';
+      } else {
+        // Amarelo (nao vermelho): so faz falta a quem usa dois computadores.
+        est.className = 'banner b-qr';
+        txt.textContent = 'Sem senha — a aba "Sincronizar" fica indisponível. Ignore se o escritório usa só este computador.';
+      }
+    } catch (e) { /* ignora */ }
+  }
+  async function salvarSenhaSync(){
+    const senha = document.getElementById('sync-token').value.trim();
+    if (!senha) return setStatusSenhaSync('Digite a senha antes de salvar.', false);
+    try {
+      const r = await fetch('/api/sync/senha', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }) });
+      const d = await r.json();
+      if (d.erro) return setStatusSenhaSync('Erro: ' + d.erro, false);
+      document.getElementById('sync-token').value = '';
+      setStatusSenhaSync('Senha salva! A aba "Sincronizar" já pode ser usada (sem reiniciar).', true);
+      carregarSenhaSync();
+      carregarSync();
+    } catch (e) { setStatusSenhaSync('Erro ao salvar: ' + e.message, false); }
   }
 
   // ---- Escritorio (areas atendidas + informacoes gerais) ----
@@ -1358,31 +1404,24 @@ Localização: Londrina, PR
     const s = document.getElementById('status-sync');
     s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
   }
-  // A tela abre so com nome + senha. O resto aparece quando a senha e digitada,
-  // porque e ela que permite listar os computadores no servidor do escritorio.
-  var timerSenha = null;
-  var ultimaSenhaBuscada = null;
-  function senhaMudou(){
-    const senha = document.getElementById('sync-senha').value;
-    document.getElementById('sync-resto').style.display = senha ? 'block' : 'none';
-    clearTimeout(timerSenha);
-    if (!senha) { ultimaSenhaBuscada = null; return; }
-    // Espera parar de digitar para nao consultar o servidor a cada tecla.
-    timerSenha = setTimeout(() => {
-      if (senha === ultimaSenhaBuscada) return;
-      ultimaSenhaBuscada = senha;
-      carregarMaquinas();
-    }, 600);
+  // A senha nao e pedida aqui: ela mora no .env (aba "Chave da API") e o
+  // sync.js a usa sozinho. Esta tela so confere se ela existe.
+  var maquinasCarregadas = false;
+  function aplicarSenhaSalva(d){
+    const temSenha = !!d.senhaSalva;
+    document.getElementById('sync-resto').style.display = temSenha ? 'block' : 'none';
+    document.getElementById('sync-sem-senha').style.display = temSenha ? 'none' : 'block';
+    // Busca a lista de computadores uma vez, assim que houver senha.
+    if (temSenha && !maquinasCarregadas) { maquinasCarregadas = true; carregarMaquinas(); }
+    if (!temSenha) maquinasCarregadas = false;
   }
   // Preenche o select com os computadores que ja apareceram no servidor. E o jeito
   // de descobrir o nome do outro PC sem ter que anotar em papel.
   async function carregarMaquinas(){
-    const senha = document.getElementById('sync-senha').value;
     const st = document.getElementById('sync-parceiro-status');
-    if (!senha) return;
     st.textContent = 'Procurando computadores...';
     try {
-      const r = await fetch('/api/sync/maquinas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }) });
+      const r = await fetch('/api/sync/maquinas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       const d = await r.json();
       if (d.erro) {
         st.textContent = d.mensagem || ('Erro: ' + d.erro);
@@ -1526,9 +1565,7 @@ Localização: Londrina, PR
       document.getElementById('sync-criar-novos').checked = !!d.criarClientesNovos;
       const autoEl = document.getElementById('sync-auto');
       if (document.activeElement !== autoEl) autoEl.value = d.autoMinutos || 0;
-      // Aviso do automatico: so faz sentido quando ele esta ligado sem a senha salva.
-      document.getElementById('sync-auto-aviso').style.display =
-        (d.autoMinutos > 0 && !d.senhaSalva) ? 'block' : 'none';
+      aplicarSenhaSalva(d);
       renderParceiroSelect();
       renderEspelhados(d.espelhados);
       renderPendentes(d.pendentes);
@@ -1545,12 +1582,15 @@ Localização: Londrina, PR
     } else if (!d.servidorConfigurado) {
       est.className = 'banner b-qr';
       txt.textContent = 'O endereço do servidor ainda não foi configurado neste computador.';
+    } else if (!d.senhaSalva) {
+      est.className = 'banner b-qr';
+      txt.textContent = 'Falta a senha da sincronização — ela é digitada na aba "Chave da API".';
     } else if (!d.id) {
       est.className = 'banner b-qr';
       txt.textContent = 'Dê um nome a este computador para começar.';
     } else if (!syncCfg.parceiros.length) {
       est.className = 'banner b-qr';
-      txt.textContent = 'Digite a senha e escolha o outro computador para poder sincronizar.';
+      txt.textContent = 'Escolha o outro computador para poder sincronizar.';
     } else if (d.ultimo && d.ultimo.erro) {
       est.className = 'banner b-falha';
       txt.textContent = d.ultimo.erro;
@@ -1614,17 +1654,15 @@ Localização: Londrina, PR
     salvarSync({ categorias }, 'Salvo.');
   }
   async function sincronizarAgora(){
-    const senha = document.getElementById('sync-senha').value;
     const parceiro = syncCfg.parceiros[0];
     if (!parceiro) return setStatusSync('Escolha o outro computador antes de sincronizar.', false);
-    if (!senha) return setStatusSync('Digite a senha da sincronização.', false);
     const btn = document.getElementById('btn-sync');
     btn.disabled = true;
     setStatusSync('Sincronizando...', true);
     try {
       // Dispara em segundo plano: a resposta volta na hora e o resultado real
       // chega pelo poll de carregarSync (um sync pode levar dezenas de segundos).
-      const r = await fetch('/api/sync/agora', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maquina: parceiro.id, senha }) });
+      const r = await fetch('/api/sync/agora', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maquina: parceiro.id }) });
       const d = await r.json();
       if (d.erro) { setStatusSync('Erro: ' + d.erro, false); btn.disabled = false; return; }
       setStatusSync('Sincronização iniciada. O resultado aparece aqui em instantes.', true);
@@ -1656,6 +1694,7 @@ Localização: Londrina, PR
 
   carregarApiKey();
   carregarGeminiKey();
+  carregarSenhaSync();
   carregarEscritorio();
   carregarPersonalidade();
   carregarTriagem();
@@ -1731,6 +1770,16 @@ function iniciarPainel(porta = 3000) {
     }
 
     // Salvar a chave do Google/Gemini. Aplica na hora, sem reiniciar o bot.
+    // Estado da senha da sincronizacao (nunca devolve a senha, so a mascara).
+    if (req.method === 'GET' && req.url === '/api/sync/senha') {
+      return enviarJson(res, 200, apikey.statusSync());
+    }
+
+    // Salvar a senha da sincronizacao. Aplica na hora, sem reiniciar o bot.
+    if (req.method === 'POST' && req.url === '/api/sync/senha') {
+      return lerCorpo(req, res, (corpo) => apikey.salvarSenhaSync(corpo.senha));
+    }
+
     if (req.method === 'POST' && req.url === '/api/apikey-gemini') {
       return lerCorpo(req, res, (corpo) => apikey.salvarChaveGemini(corpo.chave));
     }

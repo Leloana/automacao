@@ -1,12 +1,13 @@
 // apikey.js
-// Leitura e gravacao das chaves de API (DEEPSEEK_API_KEY e GEMINI_API_KEY) no
-// arquivo .env, para o cliente poder informa-las pelo painel web (sem editar
-// arquivos). Ao salvar, aplica a chave em tempo real (sem reiniciar o bot).
+// Leitura e gravacao dos segredos do .env (DEEPSEEK_API_KEY, GEMINI_API_KEY e
+// SYNC_TOKEN), para o cliente poder informa-los pelo painel web (sem editar
+// arquivos). Ao salvar, aplica o valor em tempo real (sem reiniciar o bot).
 
 const fs = require('fs');
 const path = require('path');
 const { setDeepseekKey } = require('./bot');
 const { setGeminiKey } = require('./midia');
+const sync = require('./sync');
 
 const ENV_PATH = path.join(__dirname, '.env');
 const ENV_EXEMPLO = path.join(__dirname, '.env.example');
@@ -46,11 +47,12 @@ function gravarEnv(nome, valor) {
   fs.writeFileSync(ENV_PATH, env, 'utf8');
 }
 
-// Valida o formato de uma chave colada no painel.
-function validarChave(chave) {
+// Valida o formato de um segredo colado no painel. O rotulo entra na mensagem
+// de erro porque o mesmo teste vale para as chaves e para a senha do sync.
+function validarChave(chave, rotulo = 'a chave da API') {
   chave = String(chave == null ? '' : chave).trim();
-  if (!chave) throw new Error('Informe a chave da API.');
-  if (/\s/.test(chave)) throw new Error('A chave nao pode conter espacos ou quebras de linha.');
+  if (!chave) throw new Error('Informe ' + rotulo + '.');
+  if (/\s/.test(chave)) throw new Error('O valor nao pode conter espacos ou quebras de linha.');
   return chave;
 }
 
@@ -98,4 +100,30 @@ function salvarChaveGemini(chave) {
   return statusGemini();
 }
 
-module.exports = { status, salvarChave, chaveAtual, mascarar, statusGemini, salvarChaveGemini };
+// ---- Senha da sincronizacao entre os PCs (SYNC_TOKEN) ----
+//
+// Fica aqui, e nao na aba "Sincronizar", porque e um segredo do mesmo tipo das
+// chaves: guardado no .env, digitado uma vez so. Com ela salva, `chamar()` do
+// sync.js usa process.env.SYNC_TOKEN sozinho e a aba de sincronizacao nao
+// precisa mais pedir senha nenhuma.
+
+function statusSync() {
+  const senha = valorEnv('SYNC_TOKEN');
+  return { configurada: !!senha, mascara: mascarar(senha) };
+}
+
+function salvarSenhaSync(senha) {
+  senha = validarChave(senha, 'a senha da sincronizacao');
+  gravarEnv('SYNC_TOKEN', senha);
+  // Aplica agora, sem reiniciar: o sync.js le de process.env a cada chamada.
+  process.env.SYNC_TOKEN = senha;
+  // Religa o automatico — ele fica desligado enquanto nao ha senha salva.
+  try { sync.iniciarAgendamento(); } catch (e) { console.error('Erro ao religar o sync automatico:', e.message); }
+  return statusSync();
+}
+
+module.exports = {
+  status, salvarChave, chaveAtual, mascarar,
+  statusGemini, salvarChaveGemini,
+  statusSync, salvarSenhaSync,
+};

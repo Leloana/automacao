@@ -79,18 +79,24 @@ Em CADA computador, abra o arquivo  sistema/.env  e acrescente:
 
     SYNC_URL=https://ferreiraramos.adv.br/api/sync.php
 
-Depois, no painel do bot, aba "Sincronizar":
+Depois, no painel do bot, aba "Chave da API" (no final da pagina):
+  - em "Senha da sincronizacao", digite a senha do passo 1 e salve.
+    E UMA VEZ SO: fica guardada no  sistema/.env  deste computador.
+
+Por fim, na aba "Sincronizar":
   - de um nome a cada computador (ex.: "londrina" num, "taquarituba" no outro)
     ATENCAO: os nomes tem que ser DIFERENTES entre si;
-  - cadastre o nome do OUTRO computador;
+  - escolha o OUTRO computador na lista;
   - marque o que voce quer compartilhar;
-  - digite a senha do passo 1 e clique em "Sincronizar agora".
+  - clique em "Sincronizar agora".
 
 
 SOBRE A SENHA
 -------------
-A senha nao fica guardada no painel: e digitada a cada sincronizacao.
-Se um dia voce quiser que a sincronizacao aconteca sozinha, de tempos em
-tempos, ai sim ela precisa ficar salva no  sistema/.env  de cada PC:
+Ela e digitada UMA VEZ, na aba "Chave da API", e fica guardada no
+sistema/.env  de cada PC (linha  SYNC_TOKEN=...  ). O painel nunca mostra
+a senha de volta: so os 4 primeiros e os 4 ultimos caracteres.
 
-    SYNC_TOKEN=a_mesma_senha_do_passo_1
+Enquanto ela nao for salva, a aba "Sincronizar" fica indisponivel e avisa
+onde digitar. Salvando a senha, tambem passa a funcionar a opcao de
+sincronizar sozinho de tempos em tempos (nas "Opcoes avancadas" da aba).

@@ -292,9 +292,15 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
   botão na sidebar tem um "dot" que reflete o status.
 - **Avisos** — lista os erros/avisos amigáveis ([avisos.js](sistema/avisos.js)); badge com
   contador. Poll a cada 5s.
-- **Chave da API** — grava/aplica a chave DeepSeek e a chave do Google/Gemini para
-  áudio/imagem ([apikey.js](sistema/apikey.js)); a do Google é opcional (banner amarelo
-  quando ausente, não vermelho).
+- **Chave da API** — grava/aplica os **três segredos do `.env`** ([apikey.js](sistema/apikey.js)):
+  a chave DeepSeek, a do Google/Gemini para áudio/imagem, e a **senha da sincronização**
+  (`SYNC_TOKEN`, rotas `GET`/`POST /api/sync/senha`). As duas últimas são opcionais (banner
+  amarelo quando ausentes, não vermelho). A senha do sync mora **aqui**, e não na aba
+  "Sincronizar", porque é um segredo do mesmo tipo das chaves: digitado uma vez, guardado no
+  `.env`, nunca devolvido pelo painel (só `mascarar`). Com ela salva, `chamar()` do
+  [sync.js](sistema/sync.js) usa `process.env.SYNC_TOKEN` sozinho — por isso a aba
+  "Sincronizar" **não pede senha nenhuma**. `salvarSenhaSync` também chama
+  `sync.iniciarAgendamento()`, senão o automático continuaria desligado até reiniciar o bot.
 - **Escritório** — edita o `.md` da instituição em **dois campos**
   ([escritorio.js](sistema/escritorio.js)): as **áreas atendidas** (viram a linha
   `Especialidades (áreas que o escritório atende): ...` — é dela que o bot conclui se
@@ -328,13 +334,13 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
   na mão; o painel redesenha com o que ficou valendo e avisa se algo foi ajustado.
 - **Advogados** — formulário de criar no topo + lista editável abaixo; **salva
   automaticamente** a cada mudança (não há botão "Salvar").
-- **Sincronizar** — reduzida a **5 passos** ([sync.js](sistema/sync.js)): (1) nome desta
-  máquina, (2) **senha**, (3) select do outro PC, (4) os 7 checkboxes de categoria, (5) botão.
-  ⚠️ A senha vem **antes** do select de propósito: a lista de computadores é buscada em
-  `/api/sync/maquinas` (`acao=listar`, quem já depositou pacote) e **não existe sem a senha**.
-  Por isso tudo abaixo dela vive num `#sync-resto` oculto que só aparece quando ela é digitada
-  (`senhaMudou`, com debounce de 600ms antes de consultar) — o primeiro contato com a aba
-  mostra dois campos, não nove blocos.
+- **Sincronizar** — reduzida a **4 passos** ([sync.js](sistema/sync.js)): (1) nome desta
+  máquina, (2) select do outro PC, (3) os 7 checkboxes de categoria, (4) botão.
+  ⚠️ **A aba não pede senha** — ela é o `SYNC_TOKEN` do `.env`, digitado na aba "Chave da API".
+  Tudo além do nome da máquina vive num `#sync-resto` que só aparece quando `senhaSalva` é
+  verdadeiro (`aplicarSenhaSalva`); sem senha, a aba mostra só um banner apontando para a aba
+  certa. Isso porque a lista de computadores vem de `/api/sync/maquinas` (`acao=listar`, quem
+  já depositou pacote) e **não existe sem a senha** — não havia o que mostrar antes dela.
   O select guarda **um** parceiro (`parceiros: [{id, rotulo}]`), que é o que `sincronizarAgora`
   e `iniciarAgendamento` sempre consumiram (`parceiros[0]`); `renderParceiroSelect` reinsere o
   parceiro salvo mesmo quando o servidor não o devolve, para ele não sumir da tela.
