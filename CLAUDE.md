@@ -328,10 +328,20 @@ template string) com **navegação lateral** (sidebar): uma seção visível por
   na mão; o painel redesenha com o que ficou valendo e avisa se algo foi ajustado.
 - **Advogados** — formulário de criar no topo + lista editável abaixo; **salva
   automaticamente** a cada mudança (não há botão "Salvar").
-- **Sincronizar** — nome desta máquina, senha, escolha do outro PC (botão **Procurar**, que
-  lista via `acao=listar` quem já depositou pacote — evita ter que anotar o nome em papel),
-  os 7 checkboxes de categoria, modo de importação, listas de "espelhados" e "pendentes" com
-  ação por linha, e o intervalo do automático ([sync.js](sistema/sync.js)).
+- **Sincronizar** — reduzida a **5 passos** ([sync.js](sistema/sync.js)): (1) nome desta
+  máquina, (2) **senha**, (3) select do outro PC, (4) os 7 checkboxes de categoria, (5) botão.
+  ⚠️ A senha vem **antes** do select de propósito: a lista de computadores é buscada em
+  `/api/sync/maquinas` (`acao=listar`, quem já depositou pacote) e **não existe sem a senha**.
+  Por isso tudo abaixo dela vive num `#sync-resto` oculto que só aparece quando ela é digitada
+  (`senhaMudou`, com debounce de 600ms antes de consultar) — o primeiro contato com a aba
+  mostra dois campos, não nove blocos.
+  O select guarda **um** parceiro (`parceiros: [{id, rotulo}]`), que é o que `sincronizarAgora`
+  e `iniciarAgendamento` sempre consumiram (`parceiros[0]`); `renderParceiroSelect` reinsere o
+  parceiro salvo mesmo quando o servidor não o devolve, para ele não sumir da tela.
+  O resto (rótulo, modo de importação, criar clientes novos, minutos do automático, listas de
+  "espelhados" e "pendentes") ficou num `<details>` **"Opções avançadas"** fechado. As duas
+  listas são a exceção: quando têm itens, `atualizarTituloAvancado` **abre o `<details>`** e
+  põe a contagem no `<summary>` — senão o usuário nunca saberia que há algo a decidir.
   O `POST /api/sync/agora` dispara em **segundo plano** e responde na hora, no padrão do
   `/api/trocar`: `lerCorpo` é **síncrono** e, se o callback devolvesse uma Promise, o painel
   serializaria `{}` e mostraria um sucesso instantâneo e **falso**. O resultado real chega

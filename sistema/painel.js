@@ -500,54 +500,43 @@ Localização: Londrina, PR
 
     <div id="sync-estado" class="banner b-carregando" style="margin-bottom:16px"><span class="dot"></span><span id="sync-estado-txt">Carregando...</span></div>
 
-    <!-- 1) Identificacao desta maquina -->
+    <!-- 1) Nome desta maquina -->
     <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">🏷️ Qual é este computador</div>
+      <div style="font-weight:600;margin-bottom:4px">1️⃣ Qual é este computador</div>
       <p class="sub" style="margin:0 0 12px">Um apelido curto, só letras minúsculas e sem espaço (ex.: <code>londrina</code>). É por ele que o outro PC reconhece os dados que vêm daqui. <b>Os dois computadores não podem ter o mesmo nome.</b></p>
       <div class="field" style="max-width:280px">
         <label>Nome deste computador</label>
         <input type="text" id="sync-id" placeholder="londrina" onchange="salvarIdentidade()" />
       </div>
-      <div class="field" style="max-width:380px">
-        <label>Como aparece para o outro PC (opcional)</label>
-        <input type="text" id="sync-rotulo" placeholder="PC de Londrina" onchange="salvarIdentidade()" />
+    </div>
+
+    <!-- 2) Senha: destrava o resto da tela (e a lista de computadores) -->
+    <div class="adv">
+      <div style="font-weight:600;margin-bottom:4px">2️⃣ Senha da sincronização</div>
+      <p class="sub" style="margin:0 0 12px">A <b>mesma nos dois computadores</b> — foi definida quando o site do escritório foi preparado. É ela que deixa este PC ver os outros; <b>o resto da tela aparece depois que você digitar.</b> Não fica guardada aqui: você digita quando for usar.</p>
+      <div class="field" style="max-width:320px">
+        <label>Senha</label>
+        <input type="password" id="sync-senha" placeholder="senha combinada" oninput="senhaMudou()" />
       </div>
     </div>
 
-    <!-- 2) Senha (usada tanto para procurar quanto para sincronizar) -->
-    <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">🔐 Senha da sincronização</div>
-      <p class="sub" style="margin:0 0 12px">A <b>mesma nos dois computadores</b> — foi definida quando o site do escritório foi preparado. Não fica guardada nesta tela: você digita quando for usar.</p>
-      <div class="field" style="max-width:320px">
-        <label>Senha</label>
-        <input type="password" id="sync-senha" placeholder="senha combinada" />
-      </div>
-    </div>
+    <!-- Tudo daqui para baixo so aparece com a senha preenchida -->
+    <div id="sync-resto" style="display:none">
 
     <!-- 3) O outro computador -->
     <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">💻 Com qual computador sincronizar</div>
-      <p class="sub" style="margin:0 0 12px">Clique em <b>Procurar</b> para ver os computadores que já apareceram no servidor do escritório. Um computador só aparece aqui <b>depois de sincronizar pelo menos uma vez</b>.</p>
-
-      <div id="sync-parceiros"></div>
-
-      <button class="btn-add" onclick="procurarMaquinas()">🔍 Procurar computadores</button>
-      <div id="sync-achados"></div>
-
-      <details class="mais">
-        <summary>Não apareceu na lista? Cadastrar pelo nome</summary>
-        <p class="sub" style="margin:8px 0 0">Use o nome exato que foi dado ao outro PC (o campo "Nome deste computador", na tela dele).</p>
-        <div class="add-col">
-          <input type="text" id="sync-novo-id" placeholder="taquarituba" />
-          <input type="text" id="sync-novo-rotulo" placeholder="PC de Taquarituba (opcional)" />
-          <button class="btn-add" onclick="addParceiro()">+ Adicionar</button>
-        </div>
-      </details>
+      <div style="font-weight:600;margin-bottom:4px">3️⃣ Com qual computador sincronizar</div>
+      <p class="sub" style="margin:0 0 12px">Escolha na lista. Um computador só aparece aqui <b>depois de sincronizar pelo menos uma vez</b>.</p>
+      <div class="field" style="max-width:380px">
+        <label>Outro computador</label>
+        <select id="sync-parceiro" onchange="escolherParceiro()"></select>
+      </div>
+      <p class="sub" id="sync-parceiro-status" style="margin:8px 0 0"></p>
     </div>
 
-    <!-- 3) O que sincronizar -->
+    <!-- 4) O que sincronizar -->
     <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">📦 O que enviar e receber</div>
+      <div style="font-weight:600;margin-bottom:4px">4️⃣ O que enviar e receber</div>
       <p class="sub" style="margin:0 0 12px">Marque só o que faz sentido compartilhar. <b>As chaves da API nunca são enviadas</b>, em nenhuma opção.</p>
       <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-clientes" onchange="salvarCategorias()" /><span><b>Fichas dos clientes</b> — o que cada cliente já contou (área do caso, observações e um resumo do atendimento recente).</span></label>
       <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-whitelist" onchange="salvarCategorias()" /><span><b>Clientes autorizados</b> — as duas listas são <b>somadas</b>, nunca apagadas. Quem você bloqueou também passa a ser bloqueado no outro PC.</span></label>
@@ -558,55 +547,65 @@ Localização: Londrina, PR
       <label class="ack" style="margin:0 0 6px"><input type="checkbox" id="cat-escritorio" onchange="salvarCategorias()" /><span><b>Dados do escritório</b> — áreas atendidas, horário, endereço e orientações.</span></label>
     </div>
 
-    <!-- 5) Como aplicar o que chega -->
-    <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">📥 Como usar o que vier do outro PC</div>
-      <p class="sub" style="margin:0 0 12px">Isto vale para as <b>fichas dos clientes</b>. As outras opções (advogados, mensagens...) são sempre aplicadas direto.</p>
-      <label class="ack" style="margin:0 0 8px">
-        <input type="radio" name="sync-modo" value="externo" onchange="salvarModo()" />
-        <span><b>Manter separado</b> (recomendado) — o que vem do outro PC aparece na ficha num trecho <b>à parte e identificado</b>. O bot lê, mas trata como "ainda não confirmado" e confere com o cliente. <b>Nada do que você tem aqui é alterado.</b> Dá para voltar atrás.</span>
-      </label>
-      <label class="ack" style="margin:0 0 8px">
-        <input type="radio" name="sync-modo" value="interno" onchange="salvarModo()" />
-        <span><b>Juntar com o que já tenho</b> — o que vem do outro PC vira ficha deste computador e o aviso de "veio de fora" some. Use ao <b>trocar de computador</b> ou quando os dois números atendem a mesma pessoa e você quer uma ficha só. <b>Não dá para desfazer.</b></span>
-      </label>
-      <label class="ack" style="margin:8px 0 0">
-        <input type="checkbox" id="sync-criar-novos" onchange="salvarCriarNovos()" />
-        <span>Criar automaticamente a ficha de clientes que só existem no outro PC. Desligado, eles ficam numa lista para você decidir um a um. <b>Em nenhum dos casos o número é autorizado sozinho</b> — isso continua sendo feito na aba "Criar cliente".</span>
-      </label>
-    </div>
-
-    <!-- 6) Acao -->
+    <!-- 5) Acao -->
     <button class="btn-save" id="btn-sync" onclick="sincronizarAgora()">Sincronizar agora</button>
     <div class="status" id="status-sync"></div>
     <div id="sync-ultimo" class="banner b-carregando" style="display:none"></div>
 
-    <!-- 7) Clientes com dado vindo de fora (so no modo "manter separado") -->
-    <div class="adv" id="sync-box-espelhados" style="display:none">
-      <div style="font-weight:600;margin-bottom:4px">🔗 Clientes com informação do outro computador</div>
-      <p class="sub" style="margin:0 0 12px">O trecho vindo de fora está guardado à parte na ficha destes clientes. <b>Juntar</b> transforma aquilo em ficha deste computador e tira o aviso de "veio de fora" — não dá para desfazer.</p>
-      <div id="sync-espelhados"></div>
-    </div>
+    <!-- Tudo o que se decide uma vez na vida fica fechado aqui -->
+    <details class="mais" id="sync-avancado">
+      <summary id="sync-avancado-titulo">⚙️ Opções avançadas</summary>
 
-    <!-- 8) Clientes que so existem no outro PC -->
-    <div class="adv" id="sync-box-pendentes" style="display:none">
-      <div style="font-weight:600;margin-bottom:4px">🆕 Clientes que só existem no outro computador</div>
-      <p class="sub" style="margin:0 0 12px">Estes clientes nunca escreveram para o número deste computador. <b>Importar</b> cria a ficha aqui — mas <b>não</b> autoriza o número: para o bot atender, use a aba "Criar cliente".</p>
-      <div id="sync-pendentes"></div>
-    </div>
+      <div class="field" style="max-width:380px;margin-top:12px">
+        <label>Como este computador aparece para o outro (opcional)</label>
+        <input type="text" id="sync-rotulo" placeholder="PC de Londrina" onchange="salvarIdentidade()" />
+      </div>
 
-    <!-- 9) Automatico -->
-    <div class="adv">
-      <div style="font-weight:600;margin-bottom:4px">⏰ Sincronizar sozinho</div>
-      <p class="sub" style="margin:0 0 12px">De quanto em quanto tempo sincronizar sem você precisar clicar. <b>0 = desligado</b> (só quando você mandar).</p>
-      <div class="field" style="max-width:280px">
-        <label>A cada quantos minutos</label>
-        <input type="number" id="sync-auto" min="0" max="1440" step="1" onchange="salvarAuto()" />
+      <div class="adv">
+        <div style="font-weight:600;margin-bottom:4px">📥 Como usar o que vier do outro PC</div>
+        <p class="sub" style="margin:0 0 12px">Isto vale para as <b>fichas dos clientes</b>. As outras opções (advogados, mensagens...) são sempre aplicadas direto.</p>
+        <label class="ack" style="margin:0 0 8px">
+          <input type="radio" name="sync-modo" value="externo" onchange="salvarModo()" />
+          <span><b>Manter separado</b> (recomendado) — o que vem do outro PC aparece na ficha num trecho <b>à parte e identificado</b>. O bot lê, mas trata como "ainda não confirmado" e confere com o cliente. <b>Nada do que você tem aqui é alterado.</b> Dá para voltar atrás.</span>
+        </label>
+        <label class="ack" style="margin:0 0 8px">
+          <input type="radio" name="sync-modo" value="interno" onchange="salvarModo()" />
+          <span><b>Juntar com o que já tenho</b> — o que vem do outro PC vira ficha deste computador e o aviso de "veio de fora" some. Use ao <b>trocar de computador</b> ou quando os dois números atendem a mesma pessoa e você quer uma ficha só. <b>Não dá para desfazer.</b></span>
+        </label>
+        <label class="ack" style="margin:8px 0 0">
+          <input type="checkbox" id="sync-criar-novos" onchange="salvarCriarNovos()" />
+          <span>Criar automaticamente a ficha de clientes que só existem no outro PC. Desligado, eles ficam numa lista para você decidir um a um. <b>Em nenhum dos casos o número é autorizado sozinho</b> — isso continua sendo feito na aba "Criar cliente".</span>
+        </label>
       </div>
-      <div id="sync-auto-aviso" class="banner b-qr" style="display:none;margin-top:10px">
-        <span>⚠️ Para sincronizar sozinho, a senha precisa ficar <b>guardada neste computador</b> (linha <code>SYNC_TOKEN</code> no arquivo de configuração). Enquanto ela não estiver salva, isto continua desligado e você usa o botão acima.</span>
+
+      <div class="adv">
+        <div style="font-weight:600;margin-bottom:4px">⏰ Sincronizar sozinho</div>
+        <p class="sub" style="margin:0 0 12px">De quanto em quanto tempo sincronizar sem você precisar clicar. <b>0 = desligado</b> (só quando você mandar).</p>
+        <div class="field" style="max-width:280px">
+          <label>A cada quantos minutos</label>
+          <input type="number" id="sync-auto" min="0" max="1440" step="1" onchange="salvarAuto()" />
+        </div>
+        <div id="sync-auto-aviso" class="banner b-qr" style="display:none;margin-top:10px">
+          <span>⚠️ Para sincronizar sozinho, a senha precisa ficar <b>guardada neste computador</b> (linha <code>SYNC_TOKEN</code> no arquivo de configuração). Enquanto ela não estiver salva, isto continua desligado e você usa o botão acima.</span>
+        </div>
       </div>
-    </div>
+
+      <!-- Clientes com dado vindo de fora (so no modo "manter separado") -->
+      <div class="adv" id="sync-box-espelhados" style="display:none">
+        <div style="font-weight:600;margin-bottom:4px">🔗 Clientes com informação do outro computador</div>
+        <p class="sub" style="margin:0 0 12px">O trecho vindo de fora está guardado à parte na ficha destes clientes. <b>Juntar</b> transforma aquilo em ficha deste computador e tira o aviso de "veio de fora" — não dá para desfazer.</p>
+        <div id="sync-espelhados"></div>
+      </div>
+
+      <!-- Clientes que so existem no outro PC -->
+      <div class="adv" id="sync-box-pendentes" style="display:none">
+        <div style="font-weight:600;margin-bottom:4px">🆕 Clientes que só existem no outro computador</div>
+        <p class="sub" style="margin:0 0 12px">Estes clientes nunca escreveram para o número deste computador. <b>Importar</b> cria a ficha aqui — mas <b>não</b> autoriza o número: para o bot atender, use a aba "Criar cliente".</p>
+        <div id="sync-pendentes"></div>
+      </div>
+    </details>
+
+    </div><!-- /sync-resto -->
 
     <p class="sub" style="margin-top:16px"><b>Atenção:</b> isto sincroniza o que o escritório <b>sabe</b> sobre os clientes — não a conta do WhatsApp nem as conversas em si. Cada computador continua com o seu próprio número e precisa do seu próprio QR code.</p>
   </div>
@@ -1359,62 +1358,86 @@ Localização: Londrina, PR
     const s = document.getElementById('status-sync');
     s.textContent = msg; s.className = 'status ' + (ok ? 'ok' : 'erro');
   }
-  function renderParceiros(){
-    const box = document.getElementById('sync-parceiros');
-    box.innerHTML = '';
-    if (!syncCfg.parceiros.length) {
-      box.innerHTML = '<p class="sub">Nenhum outro computador escolhido ainda.</p>';
-      return;
-    }
-    syncCfg.parceiros.forEach((p, i) => {
-      const div = document.createElement('div');
-      div.className = 'sync-item';
-      div.innerHTML = '<span class="nome">✅ <b>' + esc(p.rotulo || p.id) + '</b> <span class="sub">(' + esc(p.id) + ')</span></span>' +
-        '<button class="btn-rem" data-rem-parc="' + i + '">Remover</button>';
-      box.appendChild(div);
-    });
-    box.querySelectorAll('[data-rem-parc]').forEach((b) => {
-      b.addEventListener('click', () => removerParceiro(Number(b.getAttribute('data-rem-parc'))));
-    });
-  }
-  // Pergunta ao servidor quais computadores ja apareceram por la. E o jeito de
-  // descobrir o nome do outro PC sem ter que anotar em papel.
-  async function procurarMaquinas(){
+  // A tela abre so com nome + senha. O resto aparece quando a senha e digitada,
+  // porque e ela que permite listar os computadores no servidor do escritorio.
+  var timerSenha = null;
+  var ultimaSenhaBuscada = null;
+  function senhaMudou(){
     const senha = document.getElementById('sync-senha').value;
-    const box = document.getElementById('sync-achados');
-    if (!senha) { setStatusSync('Digite a senha da sincronização acima para poder procurar.', false); return; }
-    box.innerHTML = '<p class="sub">Procurando...</p>';
+    document.getElementById('sync-resto').style.display = senha ? 'block' : 'none';
+    clearTimeout(timerSenha);
+    if (!senha) { ultimaSenhaBuscada = null; return; }
+    // Espera parar de digitar para nao consultar o servidor a cada tecla.
+    timerSenha = setTimeout(() => {
+      if (senha === ultimaSenhaBuscada) return;
+      ultimaSenhaBuscada = senha;
+      carregarMaquinas();
+    }, 600);
+  }
+  // Preenche o select com os computadores que ja apareceram no servidor. E o jeito
+  // de descobrir o nome do outro PC sem ter que anotar em papel.
+  async function carregarMaquinas(){
+    const senha = document.getElementById('sync-senha').value;
+    const st = document.getElementById('sync-parceiro-status');
+    if (!senha) return;
+    st.textContent = 'Procurando computadores...';
     try {
       const r = await fetch('/api/sync/maquinas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }) });
       const d = await r.json();
-      if (d.erro) { box.innerHTML = ''; setStatusSync(d.mensagem || ('Erro: ' + d.erro), false); return; }
-      // Nao faz sentido sincronizar consigo mesmo, nem repetir quem ja foi escolhido.
-      const outros = (d.maquinas || []).filter((m) => m.id !== syncCfg.id && !syncCfg.parceiros.some((p) => p.id === m.id));
-      if (!outros.length) {
-        box.innerHTML = '<p class="sub">Nenhum computador novo encontrado. Lembre: o outro PC precisa ter sincronizado pelo menos uma vez para aparecer aqui.</p>';
+      if (d.erro) {
+        st.textContent = d.mensagem || ('Erro: ' + d.erro);
+        renderParceiroSelect();
         return;
       }
-      box.innerHTML = '';
-      outros.forEach((m) => {
-        const div = document.createElement('div');
-        div.className = 'sync-item';
-        div.innerHTML = '<span class="nome"><b>' + esc(m.rotulo || m.id) + '</b> <span class="sub">(' + esc(m.id) + ')</span><br>' +
-          '<span class="sub">Enviou dados em ' + esc(quando(m.gravado_em)) + '</span></span>' +
-          '<button class="btn-mini ok" data-usar="' + esc(m.id) + '" data-rot="' + esc(m.rotulo || m.id) + '">Usar este</button>';
-        box.appendChild(div);
-      });
-      box.querySelectorAll('[data-usar]').forEach((b) => {
-        b.addEventListener('click', () => {
-          box.innerHTML = '';
-          salvarSync({ parceiros: syncCfg.parceiros.concat([{ id: b.getAttribute('data-usar'), rotulo: b.getAttribute('data-rot') }]) }, 'Computador escolhido.');
-        });
-      });
-    } catch (e) { box.innerHTML = ''; setStatusSync('Erro ao procurar: ' + e.message, false); }
+      // Nao faz sentido sincronizar consigo mesmo.
+      const outros = (d.maquinas || []).filter((m) => m.id !== syncCfg.id);
+      renderParceiroSelect(outros);
+      st.textContent = outros.length
+        ? ''
+        : 'Nenhum computador encontrado. Lembre: o outro PC precisa ter sincronizado pelo menos uma vez para aparecer aqui.';
+    } catch (e) { st.textContent = 'Erro ao procurar: ' + e.message; }
+  }
+  // Monta as opcoes do select. O parceiro ja salvo entra na lista mesmo que nao
+  // venha do servidor, para nao sumir da tela.
+  function renderParceiroSelect(achados){
+    const sel = document.getElementById('sync-parceiro');
+    if (document.activeElement === sel) return;
+    const atual = syncCfg.parceiros[0];
+    const itens = (achados || []).slice();
+    if (atual && !itens.some((m) => m.id === atual.id)) itens.unshift(atual);
+    sel.innerHTML = '<option value="">— escolha —</option>';
+    itens.forEach((m) => {
+      const o = document.createElement('option');
+      o.value = m.id;
+      o.textContent = (m.rotulo || m.id) + ' (' + m.id + ')';
+      o.setAttribute('data-rot', m.rotulo || m.id);
+      sel.appendChild(o);
+    });
+    sel.value = atual ? atual.id : '';
+  }
+  // So um parceiro por vez: e o unico que o sync.js usa (parceiros[0]).
+  function escolherParceiro(){
+    const sel = document.getElementById('sync-parceiro');
+    const id = sel.value;
+    if (!id) return salvarSync({ parceiros: [] }, 'Nenhum computador escolhido.');
+    const rotulo = sel.selectedOptions[0].getAttribute('data-rot') || id;
+    salvarSync({ parceiros: [{ id, rotulo }] }, 'Computador escolhido.');
+  }
+  // As duas listas abaixo vivem dentro do "Opções avançadas", que abre fechado.
+  // Sem este aviso no titulo o usuario nunca descobriria que ha algo a decidir.
+  var qtdEspelhados = 0, qtdPendentes = 0;
+  function atualizarTituloAvancado(){
+    const total = qtdEspelhados + qtdPendentes;
+    document.getElementById('sync-avancado-titulo').textContent =
+      total ? '⚙️ Opções avançadas — ' + total + ' cliente(s) aguardando sua decisão' : '⚙️ Opções avançadas';
+    if (total) document.getElementById('sync-avancado').open = true;
   }
   function renderEspelhados(lista){
     const box = document.getElementById('sync-espelhados');
     const caixa = document.getElementById('sync-box-espelhados');
     caixa.style.display = (lista && lista.length) ? 'block' : 'none';
+    qtdEspelhados = (lista || []).length;
+    atualizarTituloAvancado();
     if (!lista || !lista.length) return;
     box.innerHTML = '';
     lista.forEach((c) => {
@@ -1451,6 +1474,8 @@ Localização: Londrina, PR
     const box = document.getElementById('sync-pendentes');
     const caixa = document.getElementById('sync-box-pendentes');
     caixa.style.display = (lista && lista.length) ? 'block' : 'none';
+    qtdPendentes = (lista || []).length;
+    atualizarTituloAvancado();
     if (!lista || !lista.length) return;
     box.innerHTML = '';
     lista.forEach((p) => {
@@ -1504,7 +1529,7 @@ Localização: Londrina, PR
       // Aviso do automatico: so faz sentido quando ele esta ligado sem a senha salva.
       document.getElementById('sync-auto-aviso').style.display =
         (d.autoMinutos > 0 && !d.senhaSalva) ? 'block' : 'none';
-      renderParceiros();
+      renderParceiroSelect();
       renderEspelhados(d.espelhados);
       renderPendentes(d.pendentes);
       atualizarEstadoSync(d);
@@ -1525,7 +1550,7 @@ Localização: Londrina, PR
       txt.textContent = 'Dê um nome a este computador para começar.';
     } else if (!syncCfg.parceiros.length) {
       est.className = 'banner b-qr';
-      txt.textContent = 'Cadastre o outro computador para poder sincronizar.';
+      txt.textContent = 'Digite a senha e escolha o outro computador para poder sincronizar.';
     } else if (d.ultimo && d.ultimo.erro) {
       est.className = 'banner b-falha';
       txt.textContent = d.ultimo.erro;
@@ -1572,7 +1597,7 @@ Localização: Londrina, PR
       const d = await r.json();
       if (d.erro) return setStatusSync('Erro: ' + d.erro, false);
       syncCfg = d;
-      renderParceiros();
+      renderParceiroSelect();
       atualizarEstadoSync(d);
       if (msgOk) setStatusSync(msgOk, true);
     } catch (e) { setStatusSync('Erro ao salvar: ' + e.message, false); }
@@ -1583,19 +1608,6 @@ Localização: Londrina, PR
     document.getElementById('sync-id').value = id;
     salvarSync({ id, rotulo }, 'Salvo.');
   }
-  function addParceiro(){
-    const id = document.getElementById('sync-novo-id').value.trim().toLowerCase();
-    const rotulo = document.getElementById('sync-novo-rotulo').value.trim();
-    if (!id) return setStatusSync('Informe o nome do outro computador.', false);
-    if (id === (syncCfg.id || '')) return setStatusSync('Esse é o nome DESTE computador. Use o nome do outro.', false);
-    if (syncCfg.parceiros.some((p) => p.id === id)) return setStatusSync('Esse computador já está cadastrado.', false);
-    document.getElementById('sync-novo-id').value = '';
-    document.getElementById('sync-novo-rotulo').value = '';
-    salvarSync({ parceiros: syncCfg.parceiros.concat([{ id, rotulo: rotulo || id }]) }, 'Computador cadastrado.');
-  }
-  function removerParceiro(i){
-    salvarSync({ parceiros: syncCfg.parceiros.filter((_, k) => k !== i) }, 'Computador removido.');
-  }
   function salvarCategorias(){
     const categorias = {};
     CATS.forEach((c) => { categorias[c] = document.getElementById('cat-' + c).checked; });
@@ -1604,7 +1616,8 @@ Localização: Londrina, PR
   async function sincronizarAgora(){
     const senha = document.getElementById('sync-senha').value;
     const parceiro = syncCfg.parceiros[0];
-    if (!parceiro) return setStatusSync('Cadastre o outro computador antes de sincronizar.', false);
+    if (!parceiro) return setStatusSync('Escolha o outro computador antes de sincronizar.', false);
+    if (!senha) return setStatusSync('Digite a senha da sincronização.', false);
     const btn = document.getElementById('btn-sync');
     btn.disabled = true;
     setStatusSync('Sincronizando...', true);
